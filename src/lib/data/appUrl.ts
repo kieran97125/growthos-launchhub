@@ -8,7 +8,7 @@ function fallbackBaseUrl() {
     return "http://localhost:3010";
   }
 
-  return "https://YOUR_PRODUCTION_DOMAIN";
+  return "https://growthos-launchhub.vercel.app";
 }
 
 export function getPublicBaseUrl() {
