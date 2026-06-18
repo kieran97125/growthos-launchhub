@@ -11,26 +11,30 @@ import {
   hasSupabaseAdminEnv,
 } from "@/lib/supabase/admin";
 
+function demoSeedFallbackResponse(mode = "demo_seed_fallback") {
+  return NextResponse.json({
+    ok: true,
+    form: alyssaDefaultForm,
+    brand: alyssaBrand,
+    treatments: alyssaTreatments,
+    packages: alyssaPackages,
+    branches: alyssaBranches,
+    mode,
+  });
+}
+
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ token: string }> }
 ) {
   const { token } = await context.params;
 
-  if (!hasSupabaseAdminEnv()) {
-    if (token !== alyssaDefaultForm.publicFormToken) {
-      return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
-    }
+  if (token === alyssaDefaultForm.publicFormToken) {
+    return demoSeedFallbackResponse();
+  }
 
-    return NextResponse.json({
-      ok: true,
-      form: alyssaDefaultForm,
-      brand: alyssaBrand,
-      treatments: alyssaTreatments,
-      packages: alyssaPackages,
-      branches: alyssaBranches,
-      mode: "local_seed",
-    });
+  if (!hasSupabaseAdminEnv()) {
+    return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
   }
 
   const supabase = createSupabaseAdminClient();
@@ -41,18 +45,6 @@ export async function GET(
     .maybeSingle();
 
   if (formError || !form) {
-    if (!formError && token === alyssaDefaultForm.publicFormToken) {
-      return NextResponse.json({
-        ok: true,
-        form: alyssaDefaultForm,
-        brand: alyssaBrand,
-        treatments: alyssaTreatments,
-        packages: alyssaPackages,
-        branches: alyssaBranches,
-        mode: "demo_seed_fallback",
-      });
-    }
-
     return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
   }
 
