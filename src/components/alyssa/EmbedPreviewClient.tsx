@@ -1,0 +1,183 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { CopyButton } from "./CopyButton";
+import { EmbedCodeCard } from "./EmbedCodeCard";
+
+type Props = {
+  embedCode: string;
+  embedScriptUrl: string;
+  formId: string;
+  formToken: string;
+};
+
+type DebugPayload = {
+  submitted_touch_json?: Record<string, unknown>;
+  tracking_status?: string;
+  audit_reason?: string;
+};
+
+const debugFields = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "fbclid",
+  "visitor_id",
+  "session_id",
+] as const;
+
+const sampleUrl =
+  "/embed-preview?utm_source=meta&utm_medium=paid_social&utm_campaign=launchhub_campaign_test&utm_content=offer_card&fbclid=preview_fbclid_123";
+
+function asText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : "未擷取";
+}
+
+export function EmbedPreviewClient({
+  embedCode,
+  embedScriptUrl,
+  formId,
+  formToken,
+}: Props) {
+  const [debugPayload, setDebugPayload] = useState<DebugPayload | null>(null);
+
+  useEffect(() => {
+    function handleDebugEvent(event: Event) {
+      const customEvent = event as CustomEvent<DebugPayload>;
+      setDebugPayload(customEvent.detail);
+    }
+
+    window.addEventListener("launchhub:attribution-captured", handleDebugEvent);
+    window.addEventListener("alyssa:attribution-captured", handleDebugEvent);
+
+    const existingScript = document.getElementById("launchhub-preview-embed-script");
+    existingScript?.remove();
+
+    const script = document.createElement("script");
+    script.id = "launchhub-preview-embed-script";
+    script.src = embedScriptUrl;
+    script.async = true;
+    script.dataset.formToken = formToken;
+    script.dataset.brand = "alyssa";
+    script.dataset.formId = formId;
+    script.dataset.targetId = "launchhub-preview-form-target";
+    script.dataset.height = "920";
+    document.body.appendChild(script);
+
+    return () => {
+      window.removeEventListener("launchhub:attribution-captured", handleDebugEvent);
+      window.removeEventListener("alyssa:attribution-captured", handleDebugEvent);
+      script.remove();
+    };
+  }, [embedScriptUrl, formId, formToken]);
+
+  const touch = debugPayload?.submitted_touch_json ?? {};
+
+  return (
+    <div className="mx-auto max-w-7xl px-5 py-8">
+      <section className="grid gap-6 lg:grid-cols-[1fr_420px] lg:items-start">
+        <div className="overflow-hidden rounded-[28px] border border-[#ead9cf] bg-white shadow-[0_24px_70px_rgba(90,35,72,0.12)]">
+          <div className="bg-[#fff6f0] px-6 py-5">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#9a5d76]">
+              模擬 Wix Landing Page
+            </p>
+            <h1 className="mt-4 max-w-2xl text-4xl font-bold leading-tight text-[#321428] md:text-5xl">
+              Alyssa 首次療程諮詢及膚質分析
+            </h1>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-[#6d4a5c]">
+              呢個頁面模擬真實 Wix 頁面：廣告來源參數會先存在喺呢一頁，
+              嵌入程式會讀取來源資料，再傳入表格。
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a
+                href={sampleUrl}
+                className="rounded-full bg-[#e46f64] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d95f55]"
+              >
+                載入示範 UTM URL
+              </a>
+              <CopyButton value={sampleUrl} label="複製示範 URL" />
+            </div>
+          </div>
+
+          <div className="grid gap-6 p-6 lg:grid-cols-[0.92fr_1.08fr]">
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-[#ead9cf] bg-[#fff9f3] p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#9a5d76]">
+                  預覽優惠
+                </p>
+                <h2 className="mt-3 text-2xl font-bold text-[#321428]">
+                  免費膚質分析及療程建議
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-[#7b5a6a]">
+                  適合 Meta 同 WhatsApp 廣告流量測試，確保客人來源可以喺 Wix 嵌入場景下保留。
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-[#ead9cf] bg-white p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#9a5d76]">
+                  追蹤流程
+                </p>
+                <ol className="mt-3 space-y-3 text-sm leading-6 text-[#6d4a5c]">
+                  <li>1. Wix 頁面先讀取廣告來源同點擊資料。</li>
+                  <li>2. 保存首次、最新同提交時的來源資料。</li>
+                  <li>3. 將來源資料傳入登記表格。</li>
+                  <li>4. 客人提交後建立 Lead、預約同來源記錄。</li>
+                </ol>
+              </div>
+            </div>
+
+            <div id="launchhub-preview-form-target" className="min-h-[760px]" />
+          </div>
+        </div>
+
+        <aside className="space-y-5">
+          <EmbedCodeCard
+            code={embedCode}
+            title="Wix 嵌入碼"
+            description="呢個預覽頁正正載入以下嵌入碼。"
+          />
+
+          <section className="rounded-[24px] border border-[#d7c5b9] bg-[#2b2027] p-5 text-[#fff9f3] shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d9b66f]">
+                  內部來源檢查
+                </p>
+                <h2 className="mt-2 text-lg font-bold">
+                  Wix 頁面來源資料
+                </h2>
+              </div>
+              <span className="rounded-full border border-[#6f5866] px-3 py-1 text-xs font-bold text-[#eac7ce]">
+                非客戶畫面
+              </span>
+            </div>
+
+            <div className="mt-5 space-y-2">
+              {debugFields.map((field) => (
+                <DebugRow key={field} label={field} value={asText(touch[field])} />
+              ))}
+              <DebugRow
+                label="來源狀態"
+                value={asText(debugPayload?.tracking_status ?? touch.tracking_status)}
+              />
+              <DebugRow
+                label="記錄原因"
+                value={asText(debugPayload?.audit_reason ?? touch.audit_reason)}
+              />
+            </div>
+          </section>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-2 rounded-2xl border border-[#4a3843] bg-[#382b34] p-3 text-xs sm:grid-cols-[150px_1fr]">
+      <span className="font-bold text-[#d9b66f]">{label}</span>
+      <span className="break-words text-[#fff9f3]">{value}</span>
+    </div>
+  );
+}
