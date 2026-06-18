@@ -38,9 +38,21 @@ export async function GET(
     .from("forms")
     .select("*")
     .eq("public_form_token", token)
-    .single();
+    .maybeSingle();
 
   if (formError || !form) {
+    if (!formError && token === alyssaDefaultForm.publicFormToken) {
+      return NextResponse.json({
+        ok: true,
+        form: alyssaDefaultForm,
+        brand: alyssaBrand,
+        treatments: alyssaTreatments,
+        packages: alyssaPackages,
+        branches: alyssaBranches,
+        mode: "demo_seed_fallback",
+      });
+    }
+
     return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
   }
 
