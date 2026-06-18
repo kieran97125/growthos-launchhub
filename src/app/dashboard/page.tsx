@@ -45,7 +45,7 @@ async function getDashboardOverview() {
     ),
     errorMessage:
       today.error || week.error
-        ? "Some LaunchHub data could not be loaded. Check Supabase configuration or continue with local config-backed screens."
+        ? "部分 LaunchHub 數據暫時未能載入。你可以先檢查 Supabase 設定，或繼續使用 config-backed 工作台。"
         : null,
   };
 }
@@ -60,23 +60,23 @@ export default async function DashboardPage() {
         <section className="rounded-[28px] border border-white/80 bg-white/90 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.09)]">
           <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
             <div>
-              <p className="alyssa-kicker">Launch command center</p>
+              <p className="alyssa-kicker">Dashboard / 總覽</p>
               <h1 className="mt-2 text-3xl font-bold text-slate-950">
-                Campaign Launch & Lead Capture OS
+                Campaign 啟動與 Lead Capture OS
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Monitor campaign forms, landing pages, incoming leads and
-                source evidence. Some configuration areas are save-ready and
-                will become fully database-backed in later LaunchHub stages.
+                監察 Campaign forms、Landing Pages、最新 Lead 及來源證據。
+                部分設定頁目前屬於 config-backed / save-ready 狀態，會於後續
+                LaunchHub 階段逐步變成完整 DB-backed。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <PrimaryAction href="/campaigns/new">
-                Create campaign flow
+                建立 Campaign 流程
               </PrimaryAction>
-              <SecondaryAction href="/leads">View leads</SecondaryAction>
+              <SecondaryAction href="/leads">查看 Leads</SecondaryAction>
               <SecondaryAction href="/landing-pages">
-                Landing pages
+                Landing Pages
               </SecondaryAction>
             </div>
           </div>
@@ -89,15 +89,15 @@ export default async function DashboardPage() {
         </section>
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <KpiCard label="Leads today" value={overview.todayLeads.toString()} />
-          <KpiCard label="Leads this week" value={overview.weekLeadCount.toString()} />
+          <KpiCard label="今日 Leads" value={overview.todayLeads.toString()} />
+          <KpiCard label="近 7 日 Leads" value={overview.weekLeadCount.toString()} />
           <KpiCard
-            label="Published pages"
+            label="已發布 Landing Pages"
             value={overview.publishedLandingPages.toString()}
           />
-          <KpiCard label="Active forms" value={overview.formCount.toString()} />
+          <KpiCard label="啟用 Forms" value={overview.formCount.toString()} />
           <KpiCard
-            label="Latest activity"
+            label="最新活動"
             value={formatShortDateTime(overview.latestUpdate)}
           />
         </section>
@@ -114,14 +114,13 @@ export default async function DashboardPage() {
                 {money(overview.estimatedAmount)}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Estimated package value from submitted leads in the current
-                seven-day window. Prices are read from server-side package
-                configuration, not trusted from public form submissions.
+                近 7 日提交 Lead 估算 package value。價錢由 server-side
+                package configuration 讀取，不信任 public form 提交嘅價格欄位。
               </p>
               <div className="mt-5 grid gap-3">
-                <SecondaryAction href="/performance">View performance</SecondaryAction>
+                <SecondaryAction href="/performance">查看成效</SecondaryAction>
                 <SecondaryAction href="/settings#brand-library">
-                  Open brand library
+                  開啟品牌資料庫
                 </SecondaryAction>
               </div>
             </section>
@@ -130,23 +129,23 @@ export default async function DashboardPage() {
 
         <section className="mt-6">
           <div className="mb-4">
-            <p className="alyssa-kicker">Next launch steps</p>
+            <p className="alyssa-kicker">下一步</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-950">
-              Choose the fastest path to collect campaign leads
+              選擇最快收 Lead 嘅 Campaign 入口
             </h2>
           </div>
           <div className="grid gap-5 lg:grid-cols-3">
             <LaunchCard
-              title="Create a form and campaign page"
-              body="Use the guided launch flow when you need both a campaign landing page and a registration form."
+              title="建立 Form 及 Campaign Page"
+              body="需要 Landing Page 加登記表格時，使用 guided launch flow 一次過準備投放入口。"
             />
             <LaunchCard
-              title="Generate a Wix embed"
-              body="Use form-only mode when Wix owns the page and LaunchHub only handles capture, UTM and source evidence."
+              title="產生 Wix Embed"
+              body="如果 Wix 已經負責頁面內容，就用 form-only mode，由 LaunchHub 處理 UTM、Source Snapshot 及 Lead capture。"
             />
             <LaunchCard
-              title="Review source evidence"
-              body="Use leads and performance screens to confirm submissions, source snapshots and booking request status."
+              title="檢查來源證據"
+              body="用 Leads 及成效頁確認登記記錄、Source Snapshot、booking request 狀態及資料完整度。"
             />
           </div>
         </section>
@@ -216,23 +215,23 @@ function LatestLeadsTable({ leads }: { leads: LeadRow[] }) {
     <section className="alyssa-premium-card min-w-0 p-5">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="alyssa-kicker">Latest leads</p>
+          <p className="alyssa-kicker">最新 Leads</p>
           <h2 className="mt-2 text-xl font-bold text-slate-950">
-            Recent capture activity
+            最近登記記錄
           </h2>
         </div>
         <Link
           href="/leads"
           className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700"
         >
-          View all
+          查看全部
         </Link>
       </div>
       <div className="mt-4 max-w-full overflow-x-auto">
         <table className="alyssa-table min-w-[780px] text-left text-sm">
           <thead>
             <tr className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-              {["Captured", "Customer", "Phone", "Brand", "Treatment / Package", "Status"].map(
+              {["提交時間", "客戶", "電話", "品牌", "療程 / Package", "狀態"].map(
                 (heading) => (
                   <th key={heading} className="border-b border-slate-200 px-3 py-3">
                     {heading}
@@ -252,10 +251,10 @@ function LatestLeadsTable({ leads }: { leads: LeadRow[] }) {
                     {formatShortDateTime(lead.created_at)}
                   </td>
                   <td className="border-b border-slate-100 px-3 py-3">
-                    {lead.customer_name || lead.contact?.customer_name || "Not set"}
+                    {lead.customer_name || lead.contact?.customer_name || "未填寫"}
                   </td>
                   <td className="border-b border-slate-100 px-3 py-3">
-                    {lead.phone || lead.normalized_phone || lead.contact?.phone || "Not set"}
+                    {lead.phone || lead.normalized_phone || lead.contact?.phone || "未填寫"}
                   </td>
                   <td className="border-b border-slate-100 px-3 py-3">
                     {lead.brand?.name || "Config-backed"}
@@ -263,7 +262,7 @@ function LatestLeadsTable({ leads }: { leads: LeadRow[] }) {
                   <td className="border-b border-slate-100 px-3 py-3">
                     {lead.treatment?.name || "Config-backed"}
                     <span className="block font-bold text-slate-950">
-                      {lead.package?.name || "Package"} ·{" "}
+                      {lead.package?.name || "Package"} ・{" "}
                       {money(asNumber(lead.price), lead.currency || "HKD")}
                     </span>
                   </td>
@@ -277,7 +276,7 @@ function LatestLeadsTable({ leads }: { leads: LeadRow[] }) {
             ) : (
               <tr>
                 <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
-                  No leads found in this reporting window.
+                  目前期間未有 Lead 登記記錄。
                 </td>
               </tr>
             )}
@@ -290,17 +289,17 @@ function LatestLeadsTable({ leads }: { leads: LeadRow[] }) {
 
 function leadStatusLabel(lead: LeadRow) {
   const bookingStatus = lead.booking?.booking_status || lead.booking_status;
-  if (lead.payment_status === "paid") return "Paid";
-  if (bookingStatus === "confirmed") return "Booking confirmed";
-  if (lead.payment_status === "booking_only") return "Booking requested";
-  if (lead.payment_status === "pending") return "Payment pending";
-  if (lead.lead_status === "lost") return "Lost";
-  if (lead.lead_status === "submitted") return "Submitted";
-  return "New";
+  if (lead.payment_status === "paid") return "已付款";
+  if (bookingStatus === "confirmed") return "已確認 Booking";
+  if (lead.payment_status === "booking_only") return "已提交 Booking request";
+  if (lead.payment_status === "pending") return "待付款";
+  if (lead.lead_status === "lost") return "已流失";
+  if (lead.lead_status === "submitted") return "已提交";
+  return "新登記";
 }
 
 function formatShortDateTime(value: string | null | undefined) {
-  if (!value) return "No activity";
+  if (!value) return "暫未有活動";
 
   return new Intl.DateTimeFormat("zh-HK", {
     month: "short",

@@ -4,27 +4,27 @@ import { AppNav } from "@/components/alyssa/AppNav";
 const homeCards = [
   {
     href: "/campaigns/new",
-    eyebrow: "Campaign builder",
-    title: "Create a launch flow",
-    body: "Prepare a campaign form, landing page mode and source capture setup from one guided workspace.",
+    eyebrow: "Campaign Builder",
+    title: "建立 Campaign 流程",
+    body: "由 Campaign form、Landing Page 模式到來源捕捉設定，一個流程準備好投放入口。",
   },
   {
     href: "/forms",
-    eyebrow: "Lead capture",
-    title: "Manage forms and embeds",
-    body: "Create reusable registration forms, public tokens and Wix embed snippets for each brand.",
+    eyebrow: "Lead Capture",
+    title: "管理 Forms 與 Wix Embed",
+    body: "建立可重用登記表格、Public Token 及 Wix embed snippet，方便每個品牌快速收 Lead。",
   },
   {
     href: "/landing-pages",
-    eyebrow: "Campaign pages",
-    title: "Launch testing pages",
-    body: "Package an offer, treatment angle and form into a campaign page without replacing the main website.",
+    eyebrow: "Campaign Pages",
+    title: "啟動 Landing Pages",
+    body: "將 offer、療程角度及表格包裝成 Campaign 測試頁，不取代主網站。",
   },
   {
     href: "/settings#brand-library",
     eyebrow: "Configuration",
-    title: "Set brand scope",
-    body: "Keep brands, treatments, packages, branches and form defaults ready for campaign launches.",
+    title: "設定品牌範圍",
+    body: "管理品牌、療程、package、分店及 form 預設值，確保每次 Campaign 啟動前資料一致。",
   },
 ];
 
@@ -38,31 +38,29 @@ export default function HomePage() {
             <div>
               <p className="alyssa-kicker">LaunchHub</p>
               <h1 className="mt-3 max-w-4xl text-4xl font-bold leading-tight text-slate-950 md:text-6xl">
-                Campaign Launch & Lead Capture OS
+                Campaign 啟動與 Lead Capture OS
               </h1>
               <p className="mt-5 max-w-3xl text-base leading-8 text-slate-600 md:text-lg">
-                Create campaign forms, Wix embeds, landing pages, UTM capture
-                and source snapshots for every brand. LaunchHub is the entry
-                point for collecting leads and preserving original marketing
-                evidence before CRM follow-up.
+                建立 Campaign form、Wix embed、Landing Page、UTM 捕捉及
+                Lead Source Snapshot，作為品牌收 Lead 同記錄來源證據嘅入口。
               </p>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-500">
-                建立 campaign form、Wix embed、landing page、UTM 捕捉及 lead
-                source snapshot，作為品牌收 lead 同記錄來源證據嘅入口。
+                適合香港 SME、美容及醫美品牌用作投放前置工作台：整理品牌設定、建立表格、
+                保存來源證據，然後將後續成效分析交俾 GrowthRadar。
               </p>
             </div>
 
             <div className="rounded-3xl border border-sky-100 bg-white/88 p-5 shadow-[0_16px_50px_rgba(15,23,42,0.08)]">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">
-                Product boundary
+                Product Boundary
               </p>
               <h2 className="mt-3 text-xl font-bold text-slate-950">
-                Launch now, analyze later
+                先收 Lead，後分析成效
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                LaunchHub owns capture, embeds, tokens and source snapshots.
-                GrowthRadar owns downstream intelligence, source quality and
-                monthly reporting.
+                LaunchHub 負責 Campaign capture、Embed、Form Token 及
+                Source Snapshot；GrowthRadar 負責後續成效分析、Source Quality
+                及 Monthly Report。
               </p>
             </div>
           </div>
@@ -72,13 +70,13 @@ export default function HomePage() {
               href="/campaigns/new"
               className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(15,23,42,0.20)] transition hover:-translate-y-0.5 hover:bg-slate-800"
             >
-              Create campaign flow
+              建立 Campaign 流程
             </Link>
             <Link
               href="/dashboard"
               className="rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:bg-sky-50"
             >
-              Open dashboard
+              開啟 Dashboard
             </Link>
           </div>
         </div>

@@ -1,14 +1,14 @@
 import Link from "next/link";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/campaigns/new", label: "Launch" },
+  { href: "/dashboard", label: "Dashboard / 總覽" },
+  { href: "/campaigns/new", label: "建立 Campaign" },
   { href: "/landing-pages", label: "Landing Pages" },
-  { href: "/forms", label: "Forms" },
-  { href: "/leads", label: "Leads" },
-  { href: "/performance", label: "Performance" },
-  { href: "/settings#brand-library", label: "Brand Library" },
-  { href: "/settings", label: "Settings" },
+  { href: "/forms", label: "Forms / 表格" },
+  { href: "/leads", label: "Leads / 登記記錄" },
+  { href: "/performance", label: "成效" },
+  { href: "/settings#brand-library", label: "品牌資料庫" },
+  { href: "/settings", label: "設定" },
 ];
 
 export async function AppNav() {
@@ -24,7 +24,7 @@ export async function AppNav() {
               LaunchHub
             </span>
             <span className="block text-xl font-bold text-slate-950">
-              Campaign Launch & Lead Capture OS
+              Campaign 啟動與 Lead Capture OS
             </span>
           </span>
         </Link>
@@ -33,7 +33,7 @@ export async function AppNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`alyssa-focus rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition hover:shadow-[0_10px_24px_rgba(90,35,72,0.08)] ${
+              className={`alyssa-focus rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${
                 item.href === "/campaigns/new"
                   ? "border-slate-950 bg-slate-950 text-white hover:border-slate-800 hover:bg-slate-800"
                   : "border-slate-200 bg-white/78 text-slate-700 hover:border-sky-200 hover:bg-sky-50"

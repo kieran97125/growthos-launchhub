@@ -25,18 +25,19 @@ export default async function LoginPage({
   const gateEnabled = isAdminPasswordGateEnabled();
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_18%_10%,#fff1f7_0,#fff9f3_34%,#f6f2ff_100%)] px-5 py-10 text-[#321428]">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_18%_10%,#e0f2fe_0,#f8fafc_38%,#eef6ff_100%)] px-5 py-10 text-slate-950">
       <section className="mx-auto grid min-h-[calc(100vh-80px)] max-w-5xl place-items-center">
-        <div className="w-full max-w-xl rounded-[32px] border border-[#ead9cf] bg-white/90 p-8 shadow-[0_30px_90px_rgba(90,35,72,0.14)]">
+        <div className="w-full max-w-xl rounded-[32px] border border-slate-200 bg-white/92 p-8 shadow-[0_30px_90px_rgba(15,23,42,0.14)]">
           <div className="text-center">
-            <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#9a5d76]">
-              LaunchHub
+            <p className="text-sm font-bold uppercase tracking-[0.22em] text-sky-700">
+              LaunchHub Admin
             </p>
-            <h1 className="mt-3 text-3xl font-bold text-[#321428]">
-              Admin Password
+            <h1 className="mt-3 text-3xl font-bold text-slate-950">
+              輸入 Admin Password
             </h1>
-            <p className="mt-4 text-sm font-semibold leading-6 text-[#6d4a5c]">
-              請輸入 LaunchHub admin password 繼續。
+            <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">
+              請輸入 LaunchHub admin password，進入 Campaign、Forms、Leads
+              及品牌設定工作台。
             </p>
           </div>
 
@@ -50,7 +51,7 @@ export default async function LoginPage({
             <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {error === "invalid_password"
                 ? "Password 不正確，請再試一次。"
-                : "Admin password gate 尚未正確設定。"}
+                : "暫時未能開啟 admin 工作台，請稍後再試。"}
             </p>
           )}
 
@@ -58,23 +59,23 @@ export default async function LoginPage({
             <input type="hidden" name="next" value={next} />
             {gateEnabled && (
               <label className="block">
-                <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#9a5d76]">
-                  Password
+                <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
+                  Admin Password
                 </span>
                 <input
                   name="password"
                   type="password"
                   autoComplete="current-password"
                   required
-                  className="mt-2 w-full rounded-2xl border border-[#ead9cf] bg-[#fff6f0] px-4 py-3 text-sm font-semibold text-[#5a2348] outline-none transition focus:border-[#e46f64] focus:bg-white"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
                 />
               </label>
             )}
             <button
               type="submit"
-              className="rounded-full bg-[#e46f64] px-6 py-3 text-sm font-bold text-white shadow-[0_16px_36px_rgba(228,111,100,0.24)] transition hover:-translate-y-0.5 hover:bg-[#d85f55]"
+              className="rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white shadow-[0_16px_36px_rgba(15,23,42,0.22)] transition hover:-translate-y-0.5 hover:bg-slate-800"
             >
-              {gateEnabled ? "Unlock Admin" : "Continue to Admin"}
+              {gateEnabled ? "解鎖 Admin 工作台" : "進入 Admin 工作台"}
             </button>
           </form>
         </div>

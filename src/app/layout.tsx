@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "LaunchHub",
   description:
-    "Campaign Launch & Lead Capture OS for campaign forms, Wix embeds, landing pages, UTM capture and source snapshots.",
+    "Campaign 啟動與 Lead Capture OS，用於 Campaign forms、Wix embeds、Landing Pages、UTM 捕捉及 Source Snapshots。",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
