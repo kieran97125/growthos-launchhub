@@ -1,7 +1,8 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard / 總覽" },
+  { href: "/brands", label: "品牌工作區" },
   { href: "/campaigns/new", label: "建立 Campaign" },
   { href: "/landing-pages", label: "Landing Pages" },
   { href: "/forms", label: "Forms / 表格" },
@@ -24,7 +25,7 @@ export async function AppNav() {
               LaunchHub
             </span>
             <span className="block text-xl font-bold text-slate-950">
-              Campaign 啟動與 Lead Capture OS
+              Campaign Launch & Lead Capture OS
             </span>
           </span>
         </Link>

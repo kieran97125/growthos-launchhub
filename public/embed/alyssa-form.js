@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   var ATTRIBUTION_KEYS = [
     "utm_source",
     "utm_medium",
@@ -12,6 +12,9 @@
     "msclkid",
     "wbraid",
     "gbraid",
+    "campaign_id",
+    "adset_id",
+    "ad_id",
     "ctwa_id",
     "ctwa_clid",
     "meta_ad_id",
@@ -20,6 +23,20 @@
     "placement",
     "whatsapp_referral_source_id"
   ];
+  var BACKUP_PARAM_MAP = {
+    lh_source: "utm_source",
+    lh_medium: "utm_medium",
+    lh_campaign: "utm_campaign",
+    lh_content: "utm_content",
+    lh_term: "utm_term",
+    lh_campaign_id: "campaign_id",
+    lh_adset_id: "adset_id",
+    lh_ad_id: "ad_id",
+    lh_placement: "placement",
+    lh_channel: "utm_source",
+    lh_brand: "brand"
+  };
+  var ALL_ATTRIBUTION_KEYS = ATTRIBUTION_KEYS.concat(Object.keys(BACKUP_PARAM_MAP));
 
   function safeJsonParse(value) {
     try {
@@ -51,17 +68,145 @@
     }
   }
 
+  function normalizeAttributionFields(input) {
+    var output = Object.assign({}, input || {});
+
+    Object.keys(BACKUP_PARAM_MAP).forEach(function (backupKey) {
+      var canonicalKey = BACKUP_PARAM_MAP[backupKey];
+      var value = output[backupKey];
+      if (!value) return;
+      if (!output[canonicalKey]) output[canonicalKey] = value;
+    });
+
+    if (!output.meta_campaign_id) {
+      output.meta_campaign_id = output.campaign_id || output.lh_campaign_id || output.meta_campaign_id;
+    }
+    if (!output.meta_adset_id) {
+      output.meta_adset_id = output.adset_id || output.lh_adset_id || output.meta_adset_id;
+    }
+    if (!output.meta_ad_id) {
+      output.meta_ad_id = output.ad_id || output.lh_ad_id || output.meta_ad_id;
+    }
+
+    return output;
+  }
+
   function pickParams(searchParams) {
     var output = {};
-    ATTRIBUTION_KEYS.forEach(function (key) {
+    ALL_ATTRIBUTION_KEYS.forEach(function (key) {
       var value = searchParams.get(key);
       if (value) output[key] = value;
     });
-    return output;
+    return normalizeAttributionFields(output);
   }
 
   function hasKeys(value) {
     return value && Object.keys(value).length > 0;
+  }
+
+  function getOrigin(value) {
+    try {
+      return value ? new URL(value).origin : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getPathname(value) {
+    try {
+      return value ? new URL(value).pathname : window.location.pathname;
+    } catch {
+      return window.location.pathname;
+    }
+  }
+
+  function isWixHtmlIframe() {
+    return (window.location.hostname || "").indexOf("filesusr.com") !== -1;
+  }
+
+  function getRealParentPageUrl() {
+    var referrer = document.referrer || "";
+
+    if (isWixHtmlIframe() && referrer) {
+      try {
+        var referrerUrl = new URL(referrer);
+
+        if (
+          referrerUrl.protocol === "https:" &&
+          referrerUrl.hostname.indexOf("filesusr.com") === -1
+        ) {
+          return referrerUrl.toString();
+        }
+      } catch {
+      }
+    }
+
+    return window.location.href;
+  }
+
+  function mergeSearchParams(primaryUrl, fallbackSearch) {
+    var output = new URLSearchParams();
+
+    try {
+      new URL(primaryUrl).searchParams.forEach(function (value, key) {
+        if (value) output.set(key, value);
+      });
+    } catch {
+    }
+
+    try {
+      new URLSearchParams(fallbackSearch || "").forEach(function (value, key) {
+        if (value && !output.has(key)) output.set(key, value);
+      });
+    } catch {
+    }
+
+    return output;
+  }
+
+  function getPixelValue(value, fallback) {
+    var parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  function getPixelCurrency(value) {
+    var cleaned = typeof value === "string" ? value.trim().toUpperCase() : "";
+    return cleaned || "HKD";
+  }
+
+  function isLazyLoadEnabled(value) {
+    return value === "true" || value === "1";
+  }
+
+  function getLazyRootMargin(value) {
+    var cleaned = typeof value === "string" ? value.trim() : "";
+    return cleaned || "600px";
+  }
+
+  function clampEmbedHeight(value) {
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 500;
+    return Math.max(480, Math.min(Math.ceil(parsed), 2200));
+  }
+
+  function createPlaceholder() {
+    var placeholder = document.createElement("div");
+    placeholder.setAttribute("aria-live", "polite");
+    placeholder.style.boxSizing = "border-box";
+    placeholder.style.width = "100%";
+    placeholder.style.minHeight = "96px";
+    placeholder.style.display = "flex";
+    placeholder.style.alignItems = "center";
+    placeholder.style.justifyContent = "center";
+    placeholder.style.border = "1px solid rgba(148, 163, 184, 0.28)";
+    placeholder.style.borderRadius = "18px";
+    placeholder.style.background = "rgba(248, 250, 252, 0.86)";
+    placeholder.style.color = "#475569";
+    placeholder.style.font = "600 13px/1.5 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    placeholder.style.margin = "0";
+    placeholder.style.padding = "16px";
+    placeholder.textContent = "LaunchHub form loading...";
+    return placeholder;
   }
 
   function classifyStorageStatus(localSaved, sessionSaved) {
@@ -90,6 +235,11 @@
       payload.wbraid ||
       payload.gbraid
     );
+    var hasMetaIds = Boolean(
+      payload.meta_campaign_id ||
+      payload.meta_adset_id ||
+      payload.meta_ad_id
+    );
     var hasReferrer = Boolean(payload.referrer || payload.current_page_url || payload.landing_page_url);
 
     if (utmCount >= 3) {
@@ -100,8 +250,8 @@
       return { tracking_status: "partial_utm", audit_reason: "iframe_received_parent_payload" };
     }
 
-    if (hasClickId) {
-      return { tracking_status: "click_id_only", audit_reason: "fbclid_found_without_utm" };
+    if (hasClickId || hasMetaIds) {
+      return { tracking_status: "click_id_only", audit_reason: "click_or_meta_id_found_without_utm" };
     }
 
     if (payload.source_capture_method === "parent_embed_script_local_storage_recovered") {
@@ -123,17 +273,26 @@
     var script = document.currentScript;
     if (!script) return;
 
-    var formToken = script.getAttribute("data-form-token") || "alyssa-main-form-dev-token";
-    var brand = script.getAttribute("data-brand") || "alyssa";
-    var formId = script.getAttribute("data-form-id") || "alyssa-main-form";
+    var formToken = script.getAttribute("data-form-token") || "";
+    var brand = script.getAttribute("data-brand") || "";
+    var formId = script.getAttribute("data-form-id") || "";
+    if (!formToken) {
+      console.error("[LaunchHub] Missing required data-form-token on embed script.");
+      return;
+    }
     var targetId = script.getAttribute("data-target-id") || "";
-    var height = script.getAttribute("data-height") || "820";
+    var targetSelector = script.getAttribute("data-target") || "";
+    var lazyLoad = isLazyLoadEnabled(script.getAttribute("data-lazy-load"));
+    var lazyRootMargin = getLazyRootMargin(script.getAttribute("data-lazy-root-margin"));
+    var iframeLoaded = false;
+    var height = clampEmbedHeight(script.getAttribute("data-height") || "500");
     var scriptOrigin = new URL(script.src).origin;
     var embedOrigin = scriptOrigin;
-    var parentOrigin = window.location.origin;
+    var parentPageUrl = getRealParentPageUrl();
+    var parentOrigin = getOrigin(parentPageUrl) || window.location.origin;
     var localKey = "launchhub_first_touch";
     var sessionKey = "launchhub_latest_touch";
-    var searchParams = new URLSearchParams(window.location.search);
+    var searchParams = mergeSearchParams(parentPageUrl, window.location.search);
     var visitorId =
       readStorage("launchhub_visitor_id", window.localStorage) ||
       readStorage("alyssa_visitor_id", window.localStorage) ||
@@ -167,9 +326,9 @@
       form_id: formId,
       parent_origin: parentOrigin,
       referrer: document.referrer || "",
-      landing_page_url: firstStored && firstStored.landing_page_url ? firstStored.landing_page_url : window.location.href,
-      current_page_url: window.location.href,
-      page_path: window.location.pathname,
+      landing_page_url: firstStored && firstStored.landing_page_url ? firstStored.landing_page_url : parentPageUrl,
+      current_page_url: parentPageUrl,
+      page_path: getPathname(parentPageUrl),
       page_title: document.title || "",
       captured_at: new Date().toISOString()
     };
@@ -181,6 +340,8 @@
     var sessionSaved = writeStorage(sessionKey, latestTouch, window.sessionStorage);
     writeStorage("launchhub_visitor_id", visitorId, window.localStorage);
     writeStorage("launchhub_session_id", sessionId, window.sessionStorage);
+    writeStorage("alyssa_visitor_id", visitorId, window.localStorage);
+    writeStorage("alyssa_session_id", sessionId, window.sessionStorage);
 
     var debugClassification = classifyDebugPayload(latestTouch);
     var submittedTouch = Object.assign({}, latestTouch, {
@@ -199,42 +360,83 @@
     window.__ALYSSA_LEAD_CAPTURE_DEBUG__ = debugPayload;
 
     try {
-      window.dispatchEvent(
-        new CustomEvent("launchhub:attribution-captured", { detail: debugPayload })
-      );
-      window.dispatchEvent(
-        new CustomEvent("alyssa:attribution-captured", { detail: debugPayload })
-      );
+      window.dispatchEvent(new CustomEvent("launchhub:attribution-captured", { detail: debugPayload }));
+      window.dispatchEvent(new CustomEvent("alyssa:attribution-captured", { detail: debugPayload }));
     } catch {
     }
 
     var iframeUrl = new URL(embedOrigin + "/embed/" + encodeURIComponent(formToken));
-    iframeUrl.searchParams.set("brand", brand);
-    iframeUrl.searchParams.set("form_id", formId);
+    if (brand) iframeUrl.searchParams.set("brand", brand);
+    if (formId) iframeUrl.searchParams.set("form_id", formId);
+    Object.keys(paramPayload).forEach(function (key) {
+      iframeUrl.searchParams.set(key, paramPayload[key]);
+    });
+    iframeUrl.searchParams.set("parent_url", parentPageUrl);
     iframeUrl.searchParams.set("parent_origin", parentOrigin);
 
     var iframe = document.createElement("iframe");
-    iframe.src = iframeUrl.toString();
     iframe.width = "100%";
-    iframe.height = height;
+    iframe.height = String(height);
     iframe.style.border = "0";
     iframe.style.width = "100%";
     iframe.style.maxWidth = "100%";
+    iframe.style.minHeight = "480px";
+    iframe.style.height = height + "px";
+    iframe.style.overflow = "hidden";
     iframe.style.display = "block";
+    iframe.style.margin = "0";
+    iframe.style.padding = "0";
     iframe.setAttribute("loading", "lazy");
+    iframe.setAttribute("scrolling", "no");
     iframe.setAttribute("title", "Campaign registration form");
+
+    function loadIframe(container, placeholder) {
+      if (iframeLoaded) return;
+      iframeLoaded = true;
+      iframe.src = iframeUrl.toString();
+
+      if (placeholder && placeholder.parentNode) {
+        placeholder.parentNode.replaceChild(iframe, placeholder);
+      } else if (container && !iframe.parentNode) {
+        container.appendChild(iframe);
+      } else if (script.parentNode && !iframe.parentNode) {
+        script.parentNode.insertBefore(iframe, script.nextSibling);
+      }
+    }
+
+    function setupLazyLoad(container, placeholder) {
+      if (!("IntersectionObserver" in window)) {
+        loadIframe(container, placeholder);
+        return;
+      }
+
+      var observer = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            observer.disconnect();
+            loadIframe(container, placeholder);
+          });
+        },
+        { rootMargin: lazyRootMargin }
+      );
+
+      observer.observe(placeholder || container);
+    }
 
     function sendAttribution() {
       if (!iframe.contentWindow) return;
+      var payload = {
+        first_touch_json: firstTouch,
+        latest_touch_json: latestTouch,
+        submitted_touch_json: submittedTouch
+      };
       iframe.contentWindow.postMessage(
-        {
-          type: "launchhub_attribution_payload",
-          payload: {
-            first_touch_json: firstTouch,
-            latest_touch_json: latestTouch,
-            submitted_touch_json: submittedTouch
-          }
-        },
+        { type: "launchhub_attribution_payload", payload: payload },
+        embedOrigin
+      );
+      iframe.contentWindow.postMessage(
+        { type: "alyssa_attribution_payload", payload: payload },
         embedOrigin
       );
     }
@@ -244,19 +446,62 @@
       if (event.origin !== embedOrigin) return;
       if (
         event.data &&
+        event.data.type === "launchhub:resize" &&
+        event.data.source === "launchhub-form" &&
+        (!event.data.formToken || event.data.formToken === formToken)
+      ) {
+        var nextHeight = clampEmbedHeight(event.data.height);
+        iframe.height = String(nextHeight);
+        iframe.style.height = nextHeight + "px";
+      }
+      if (
+        event.data &&
         (event.data.type === "launchhub_iframe_ready" ||
           event.data.type === "alyssa_iframe_ready")
       ) {
         sendAttribution();
       }
+      if (
+        event.data &&
+        event.data.type === "launchhub:form-submitted" &&
+        event.data.event === "CompleteRegistration"
+      ) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(event.data, "*");
+        }
+        if (window.top && window.top !== window && window.top !== window.parent) {
+          window.top.postMessage(event.data, "*");
+        }
+      }
     });
 
     var target = targetId ? document.getElementById(targetId) : null;
+    if (!target && targetSelector) {
+      try {
+        target = document.querySelector(targetSelector);
+      } catch {
+        target = null;
+      }
+    }
     if (target) {
       target.innerHTML = "";
-      target.appendChild(iframe);
+      if (lazyLoad) {
+        var targetPlaceholder = createPlaceholder();
+        target.appendChild(targetPlaceholder);
+        setupLazyLoad(target, targetPlaceholder);
+      } else {
+        target.appendChild(iframe);
+        loadIframe(target);
+      }
     } else if (script.parentNode) {
-      script.parentNode.insertBefore(iframe, script.nextSibling);
+      if (lazyLoad) {
+        var inlinePlaceholder = createPlaceholder();
+        script.parentNode.insertBefore(inlinePlaceholder, script.nextSibling);
+        setupLazyLoad(null, inlinePlaceholder);
+      } else {
+        script.parentNode.insertBefore(iframe, script.nextSibling);
+        loadIframe(null);
+      }
     }
   } catch (error) {
     console.error("[LaunchHub] Embed failed:", error);

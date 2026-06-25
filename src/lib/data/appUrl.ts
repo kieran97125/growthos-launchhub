@@ -58,6 +58,8 @@ export function getDefaultEmbedCode(formToken: string, formId: string) {
   src="${getEmbedScriptUrl()}"
   data-form-token="${formToken}"
   data-brand="alyssa"
-  data-form-id="${formId}">
+  data-form-id="${formId}"
+  data-lazy-load="true"
+  data-lazy-root-margin="600px">
 </script>`;
 }
