@@ -87,7 +87,14 @@ function buildRuntimeDerivedConfig({
   };
 }
 
-function demoSeedFallbackResponse(mode = "demo_seed_fallback") {
+function isLocalDemoSeedEnabled() {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.LAUNCHHUB_ENABLE_LOCAL_DEMO_SEED === "true"
+  );
+}
+
+function demoSeedFallbackResponse(mode = "local_demo_seed") {
   const defaultTreatment =
     alyssaTreatments.find(
       (item) => item.id === alyssaDefaultForm.defaultTreatmentId
@@ -123,7 +130,10 @@ export async function GET(
 ) {
   const { token } = await context.params;
 
-  if (token === alyssaDefaultForm.publicFormToken) {
+  if (
+    token === alyssaDefaultForm.publicFormToken &&
+    isLocalDemoSeedEnabled()
+  ) {
     return demoSeedFallbackResponse();
   }
 
@@ -131,7 +141,19 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
   }
 
-  const supabase = createSupabaseAdminClient();
+  let supabase: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    supabase = createSupabaseAdminClient();
+  } catch (error) {
+    console.error("growthos_supabase_boundary_rejected", {
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    return NextResponse.json(
+      { ok: false, error: "service_configuration_invalid" },
+      { status: 503 }
+    );
+  }
+
   const { data: form, error: formError } = await supabase
     .from("forms")
     .select("*")
