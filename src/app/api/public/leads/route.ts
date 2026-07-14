@@ -1,18 +1,17 @@
-import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   classifyAttribution,
   cleanText,
   normalizePhone,
 } from "@/lib/attribution/classify";
-import { TouchPayload } from "@/lib/attribution/types";
-import { alyssaDefaultForm } from "@/lib/data/alyssaConfig";
+import type { TouchPayload } from "@/lib/attribution/types";
+import { buildDerivedSuccessRedirectUrl } from "@/lib/data/derivedFormConfig";
+import { resolveGrowthOsPublicFormByToken } from "@/lib/data/growthosLaunchhubRepository";
 import {
   getLegalLinks,
   LEGAL_CONSENT_REQUIRED_MESSAGE,
   LEGAL_CONSENT_TEXT,
 } from "@/lib/legal/consent";
-import { appendLeadToGoogleSheet } from "@/lib/integrations/googleSheetsLeadSync";
 import {
   createSupabaseAdminClient,
   hasSupabaseAdminEnv,
@@ -21,7 +20,6 @@ import {
 type LeadSubmitPayload = {
   form_token?: string;
   form_id?: string;
-  brand_id?: string;
   treatment_id?: string;
   package_id?: string;
   branch_id?: string;
@@ -56,11 +54,11 @@ function hasAcceptedLegalConsent(value: LeadSubmitPayload["legalConsentAccepted"
 
 function getStorageRecoverySource(touch: TouchPayload) {
   if (touch.source_capture_method === "parent_embed_script_local_storage_recovered") {
-    return "local";
+    return "local" as const;
   }
 
   if (touch.source_capture_method === "parent_embed_script_session_storage_recovered") {
-    return "session";
+    return "session" as const;
   }
 
   return null;
@@ -73,10 +71,22 @@ function classifySubmittedTouch(touch: TouchPayload) {
   });
 }
 
+function confidenceFromQuality(value: string) {
+  if (value === "ctwa_detected" || value === "complete_utm") return "high";
+  if (
+    value === "storage_recovered" ||
+    value === "partial_utm" ||
+    value === "click_id_only"
+  ) {
+    return "medium";
+  }
+  if (value === "referrer_only") return "low";
+  return "unknown";
+}
+
 function normalizeOrigin(value: string | null | undefined) {
   if (!value) return null;
   const cleaned = String(value).trim();
-
   if (!cleaned) return null;
 
   try {
@@ -170,39 +180,24 @@ function shortUserAgent(request: NextRequest) {
   return (request.headers.get("user-agent") ?? "").slice(0, 160);
 }
 
-function logPublicSubmitFailure(
-  request: NextRequest,
-  input: {
-    reason: string;
-    formToken?: string | null;
-    normalizedPhone?: string | null;
-  }
-) {
-  console.warn("[LaunchHub] public_lead_submit_rejected", {
-    reason: input.reason,
-    form_token: input.formToken || null,
-    normalized_phone: input.normalizedPhone || null,
-    request_origin: normalizeOrigin(request.headers.get("origin")),
-    referer_origin: normalizeOrigin(request.headers.get("referer")),
-    user_agent: shortUserAgent(request),
-    timestamp: new Date().toISOString(),
-  });
-}
-
 function rejectPublicSubmit(
   request: NextRequest,
   status: number,
   error: string,
   message: string,
   input: {
-    formToken?: string | null;
+    formKey?: string | null;
     normalizedPhone?: string | null;
   } = {}
 ) {
-  logPublicSubmitFailure(request, {
+  console.warn("[LaunchHub] public_lead_submit_rejected", {
     reason: error,
-    formToken: input.formToken,
-    normalizedPhone: input.normalizedPhone,
+    form_key: input.formKey || null,
+    normalized_phone: input.normalizedPhone || null,
+    request_origin: normalizeOrigin(request.headers.get("origin")),
+    referer_origin: normalizeOrigin(request.headers.get("referer")),
+    user_agent: shortUserAgent(request),
+    timestamp: new Date().toISOString(),
   });
 
   return NextResponse.json({ ok: false, error, message }, { status });
@@ -213,37 +208,25 @@ function isValidNormalizedPhone(value: string) {
   return digits.length >= 8 && digits.length <= 15;
 }
 
-function isValidEmail(value: string | null) {
+function isValidEmail(value: string) {
   if (!value) return true;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function isReasonableDate(value: string | null) {
-  if (!value) return true;
+function isReasonableDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function isReasonableTime(value: string | null) {
-  if (!value) return true;
+function isReasonableTime(value: string) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-async function createLocalResponse(payload: LeadSubmitPayload) {
-  const submittedTouch = payload.submitted_touch_json ?? {};
-  const classification = classifySubmittedTouch(submittedTouch);
-
-  return NextResponse.json(
-    {
-      ok: true,
-      mode: "local_noop",
-      lead_id: randomUUID(),
-      contact_id: randomUUID(),
-      source_snapshot_id: randomUUID(),
-      source_type: classification.sourceType,
-      tracking_status: classification.trackingStatus,
-      audit_reason: classification.auditReason,
-    },
-    { status: 201 }
+function isMissingContractFunction(error: { code?: string; message?: string } | null) {
+  return Boolean(
+    error &&
+      (error.code === "PGRST202" ||
+        error.code === "42883" ||
+        error.message?.toLowerCase().includes("launchhub_create_lead"))
   );
 }
 
@@ -261,14 +244,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const formToken = cleanText(payload.form_token, 300) || "";
+  const customerName = cleanText(payload.customer_name, 120) || "";
+  const phone = cleanText(payload.phone, 80) || "";
+  const normalizedPhone = phone ? normalizePhone(phone) : "";
+  const email = cleanText(payload.email, 200) || "";
+  const appointmentDate = cleanText(payload.appointment_date, 20) || "";
+  const appointmentTime = cleanText(payload.appointment_time, 20) || "";
+
   if (cleanText(payload.honeypot)) {
-    return rejectPublicSubmit(
-      request,
-      400,
-      "spam_rejected",
-      publicMessages.spam,
-      { formToken: cleanText(payload.form_token, 300) }
-    );
+    return rejectPublicSubmit(request, 400, "spam_rejected", publicMessages.spam);
   }
 
   if (!hasAcceptedLegalConsent(payload.legalConsentAccepted)) {
@@ -277,26 +262,22 @@ export async function POST(request: NextRequest) {
       400,
       "legal_consent_missing",
       LEGAL_CONSENT_REQUIRED_MESSAGE,
-      { formToken: cleanText(payload.form_token, 300) }
+      { normalizedPhone }
     );
   }
 
-  const formToken = cleanText(payload.form_token, 300);
-  const customerName = cleanText(payload.customer_name, 120);
-  const phone = cleanText(payload.phone, 80);
-  const normalizedPhone = phone ? normalizePhone(phone) : "";
-  const email = cleanText(payload.email, 200);
-  const appointmentDate = cleanText(payload.appointment_date, 20);
-  const appointmentTime = cleanText(payload.appointment_time, 20);
-  const clientIp = getClientIp(request);
-
-  if (!formToken || !customerName || !phone || !isValidNormalizedPhone(normalizedPhone)) {
+  if (
+    !formToken ||
+    !customerName ||
+    !phone ||
+    !isValidNormalizedPhone(normalizedPhone)
+  ) {
     return rejectPublicSubmit(
       request,
       400,
       "required_fields_missing",
       publicMessages.validation,
-      { formToken, normalizedPhone }
+      { normalizedPhone }
     );
   }
 
@@ -306,83 +287,96 @@ export async function POST(request: NextRequest) {
       400,
       "invalid_email",
       publicMessages.validation,
-      { formToken, normalizedPhone }
+      { normalizedPhone }
     );
   }
 
-  if (!isReasonableDate(appointmentDate) || !isReasonableTime(appointmentTime)) {
+  if (!appointmentDate || !isReasonableDate(appointmentDate)) {
     return rejectPublicSubmit(
       request,
       400,
-      "invalid_booking_time",
-      publicMessages.validation,
-      { formToken, normalizedPhone }
+      "appointment_date_required",
+      "請選擇有效預約日期。",
+      { normalizedPhone }
     );
   }
 
-  if (isIpRateLimited(clientIp)) {
+  if (!appointmentTime || !isReasonableTime(appointmentTime)) {
+    return rejectPublicSubmit(
+      request,
+      400,
+      "appointment_time_required",
+      "請選擇有效預約時間。",
+      { normalizedPhone }
+    );
+  }
+
+  if (isIpRateLimited(getClientIp(request))) {
     return rejectPublicSubmit(
       request,
       429,
       "rate_limited",
       publicMessages.duplicate,
-      { formToken, normalizedPhone }
+      { normalizedPhone }
     );
   }
-
-  if (!formToken || !phone || normalizedPhone.length < 8) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "required_fields_missing",
-        message: "請輸入有效 WhatsApp 電話號碼。",
-      },
-      { status: 400 }
-    );
-  }
-
-  const submittedTouch = payload.submitted_touch_json ?? {};
-  const classification = classifySubmittedTouch(submittedTouch);
 
   if (!hasSupabaseAdminEnv()) {
-    if (formToken !== alyssaDefaultForm.publicFormToken) {
-      return rejectPublicSubmit(
-        request,
-        403,
-        "invalid_form",
-        publicMessages.unavailable,
-        { formToken, normalizedPhone }
-      );
-    }
-
-    return createLocalResponse(payload);
-  }
-
-  const supabase = createSupabaseAdminClient();
-  const { data: form, error: formError } = await supabase
-    .from("forms")
-    .select("*")
-    .eq("public_form_token", formToken)
-    .single();
-
-  if (formError || !form) {
     return rejectPublicSubmit(
       request,
-      403,
-      "invalid_form",
+      503,
+      "service_configuration_invalid",
       publicMessages.unavailable,
-      { formToken, normalizedPhone }
+      { normalizedPhone }
     );
   }
 
-  const currentPageUrl = cleanText(submittedTouch.current_page_url, 2000);
-  const allowedDomains = (form.allowed_domains ?? []) as string[];
-  const originValidation = getOriginValidation(allowedDomains, [
+  let supabase: ReturnType<typeof createSupabaseAdminClient>;
+  try {
+    supabase = createSupabaseAdminClient();
+  } catch (error) {
+    console.error("growthos_supabase_boundary_rejected", {
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    return rejectPublicSubmit(
+      request,
+      503,
+      "service_configuration_invalid",
+      publicMessages.unavailable,
+      { normalizedPhone }
+    );
+  }
+
+  const resolution = await resolveGrowthOsPublicFormByToken(supabase, formToken);
+  if (!resolution.ok) {
+    const status =
+      resolution.reason === "not_found" ||
+      resolution.reason === "invalid_token" ||
+      resolution.reason === "scope_mismatch"
+        ? 403
+        : 503;
+
+    return rejectPublicSubmit(
+      request,
+      status,
+      status === 403 ? "invalid_form" : "form_configuration_unavailable",
+      publicMessages.unavailable,
+      { normalizedPhone }
+    );
+  }
+
+  const {
+    form,
+    config,
+    brand,
+    services,
+    packages,
+    locations,
+  } = resolution.value;
+
+  const originValidation = getOriginValidation(form.allowedDomains, [
     request.headers.get("origin"),
     request.headers.get("referer"),
-    submittedTouch.parent_origin,
-    submittedTouch.current_page_url,
-    submittedTouch.landing_page_url,
     payload.first_touch_json?.parent_origin,
     payload.first_touch_json?.current_page_url,
     payload.first_touch_json?.landing_page_url,
@@ -395,125 +389,72 @@ export async function POST(request: NextRequest) {
   ]);
 
   if (!originValidation.allowed) {
-    console.warn("[LaunchHub] domain_not_allowed", {
-      form_token: formToken,
-      received_origins: originValidation.receivedOrigins,
-      allowed_origins: originValidation.allowedOrigins,
-    });
-    logPublicSubmitFailure(request, {
-      reason: "domain_not_allowed",
-      formToken,
-      normalizedPhone,
-    });
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "domain_not_allowed",
-        message: publicMessages.unavailable,
-        received_origins: originValidation.receivedOrigins,
-        allowed_origins: originValidation.allowedOrigins,
-      },
-      { status: 403 }
+    return rejectPublicSubmit(
+      request,
+      403,
+      "domain_not_allowed",
+      publicMessages.unavailable,
+      { formKey: form.formKey, normalizedPhone }
     );
   }
 
-  const treatmentId = cleanText(payload.treatment_id, 80) || form.default_treatment_id;
-  const branchId = cleanText(payload.branch_id, 80) || form.default_branch_id;
-  const packageId = cleanText(payload.package_id, 80) || form.default_package_id;
+  const serviceId =
+    cleanText(payload.treatment_id, 80) || config.defaultServiceId;
+  const packageId = cleanText(payload.package_id, 80) || config.defaultPackageId;
+  const locationId = cleanText(payload.branch_id, 80) || config.defaultLocationId;
 
-  const [
-    { data: packageRecord },
-    { data: treatmentRecord },
-    { data: branchRecord },
-    { data: brandRecord },
-  ] = await Promise.all([
-      supabase
-        .from("packages")
-        .select("*")
-        .eq("id", packageId)
-        .eq("status", "active")
-        .single(),
-      supabase
-        .from("treatments")
-        .select("id, brand_id, name")
-        .eq("id", treatmentId)
-        .eq("brand_id", form.brand_id)
-        .eq("status", "active")
-        .single(),
-      supabase
-        .from("branches")
-        .select("id, brand_id, name")
-        .eq("id", branchId)
-        .eq("brand_id", form.brand_id)
-        .eq("status", "active")
-        .single(),
-      supabase
-        .from("brands")
-        .select("slug, name")
-        .eq("id", form.brand_id)
-        .maybeSingle(),
-    ]);
+  const service = services.find((item) => item.id === serviceId);
+  const selectedPackage = packages.find((item) => item.id === packageId);
+  const location = locations.find((item) => item.id === locationId);
 
-  if (!packageRecord) {
+  if (!service) {
+    return rejectPublicSubmit(
+      request,
+      400,
+      "invalid_service",
+      publicMessages.validation,
+      { formKey: form.formKey, normalizedPhone }
+    );
+  }
+
+  if (!selectedPackage || selectedPackage.serviceId !== service.id) {
     return rejectPublicSubmit(
       request,
       400,
       "invalid_package",
       publicMessages.validation,
-      { formToken, normalizedPhone }
+      { formKey: form.formKey, normalizedPhone }
     );
   }
 
-  if (!treatmentRecord) {
+  if (!location) {
     return rejectPublicSubmit(
       request,
       400,
-      "invalid_treatment",
+      "invalid_location",
       publicMessages.validation,
-      { formToken, normalizedPhone }
-    );
-  }
-
-  if (!branchRecord) {
-    return rejectPublicSubmit(
-      request,
-      400,
-      "invalid_branch",
-      publicMessages.validation,
-      { formToken, normalizedPhone }
-    );
-  }
-
-  if (packageRecord.treatment_id !== treatmentId) {
-    return rejectPublicSubmit(
-      request,
-      400,
-      "package_treatment_mismatch",
-      publicMessages.validation,
-      { formToken, normalizedPhone }
+      { formKey: form.formKey, normalizedPhone }
     );
   }
 
   const duplicateWindowStart = new Date(
     Date.now() - DUPLICATE_WINDOW_MS
   ).toISOString();
-  const { data: shortWindowDuplicate, error: duplicateCheckError } = await supabase
+  const { data: shortWindowDuplicate, error: duplicateError } = await supabase
     .from("leads")
     .select("id")
-    .eq("normalized_phone", normalizedPhone)
-    .eq("form_id", form.id)
+    .eq("client_id", form.clientId)
+    .eq("brand_id", form.brandId)
+    .eq("form_key", form.formKey)
+    .eq("phone", normalizedPhone)
     .gte("created_at", duplicateWindowStart)
-    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (duplicateCheckError) {
-    console.warn("[LaunchHub] duplicate_check_failed", {
-      code: duplicateCheckError.code,
-      message: duplicateCheckError.message,
-      form_token: formToken,
-      normalized_phone: normalizedPhone,
+  if (duplicateError) {
+    console.warn("growthos_duplicate_check_failed", {
+      code: duplicateError.code,
+      form_key: form.formKey,
     });
   }
 
@@ -523,324 +464,140 @@ export async function POST(request: NextRequest) {
       429,
       "duplicate_recent_submission",
       publicMessages.duplicate,
-      { formToken, normalizedPhone }
+      { formKey: form.formKey, normalizedPhone }
     );
   }
 
-  // booking_only means a booking request was submitted without starting payment.
+  const submittedTouch = payload.submitted_touch_json ?? {};
+  const classification = classifySubmittedTouch(submittedTouch);
+  const eventValue =
+    selectedPackage.promoPrice ?? selectedPackage.originalPrice ?? 0;
   const paymentStatus =
-    packageRecord.payment_required && payload.payment_option === "pay_now"
+    selectedPackage.paymentRequired && payload.payment_option === "pay_now"
       ? "pending"
       : "booking_only";
-  const packageDisplayPrice =
-    packageRecord.promo_price ?? packageRecord.original_price ?? 0;
+  const legalLinks = getLegalLinks(brand.slug);
+  const acceptedAt = new Date().toISOString();
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .upsert(
-      {
-        customer_name: customerName,
-        phone,
-        normalized_phone: normalizedPhone,
-        email,
-      },
-      { onConflict: "normalized_phone" }
-    )
-    .select("id")
-    .single();
-
-  if (contactError || !contact) {
-    return rejectPublicSubmit(
-      request,
-      500,
-      "contact_upsert_failed",
-      publicMessages.unavailable,
-      { formToken, normalizedPhone }
-    );
-  }
-
-  const { data: recentDuplicate } = await supabase
-    .from("leads")
-    .select("id, payment_status, booking_status")
-    .eq("normalized_phone", normalizedPhone)
-    .eq("brand_id", form.brand_id)
-    .eq("treatment_id", treatmentId)
-    .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const isDuplicate =
-    Boolean(recentDuplicate) &&
-    recentDuplicate?.payment_status !== "paid" &&
-    recentDuplicate?.booking_status !== "confirmed";
-
-  const { data: snapshot, error: snapshotError } = await supabase
-    .from("lead_source_snapshots")
-    .insert({
-      source_type: classification.sourceType,
-      visitor_id: cleanText(submittedTouch.visitor_id, 120),
-      session_id: cleanText(submittedTouch.session_id, 120),
-      contact_id: contact.id,
-      first_touch_json: payload.first_touch_json ?? {},
-      latest_touch_json: payload.latest_touch_json ?? {},
-      submitted_touch_json: submittedTouch,
-      raw_payload_json: payload,
-      utm_source: cleanText(submittedTouch.utm_source, 300),
-      utm_medium: cleanText(submittedTouch.utm_medium, 300),
-      utm_campaign: cleanText(submittedTouch.utm_campaign, 500),
-      utm_id: cleanText(submittedTouch.utm_id, 300),
-      utm_content: cleanText(submittedTouch.utm_content, 500),
-      utm_term: cleanText(submittedTouch.utm_term, 500),
-      fbclid: cleanText(submittedTouch.fbclid, 1000),
-      gclid: cleanText(submittedTouch.gclid, 1000),
-      ttclid: cleanText(submittedTouch.ttclid, 1000),
-      msclkid: cleanText(submittedTouch.msclkid, 1000),
-      wbraid: cleanText(submittedTouch.wbraid, 1000),
-      gbraid: cleanText(submittedTouch.gbraid, 1000),
-      referrer: cleanText(submittedTouch.referrer, 2000),
-      landing_page_url: cleanText(submittedTouch.landing_page_url, 2000),
-      current_page_url: currentPageUrl,
-      page_path: cleanText(submittedTouch.page_path, 500),
-      page_title: cleanText(submittedTouch.page_title, 500),
-      source_capture_method: cleanText(submittedTouch.source_capture_method, 120),
-      attribution_quality: classification.attributionQuality,
-      tracking_status: classification.trackingStatus,
-      audit_reason: classification.auditReason,
-      ctwa_id: cleanText(submittedTouch.ctwa_id, 300),
-      whatsapp_message_id: cleanText(submittedTouch.whatsapp_message_id, 300),
-      whatsapp_conversation_id: cleanText(
-        submittedTouch.whatsapp_conversation_id,
-        300
-      ),
-      whatsapp_phone_number_id: cleanText(
-        submittedTouch.whatsapp_phone_number_id,
-        300
-      ),
-      meta_ad_id: cleanText(submittedTouch.meta_ad_id, 300),
-      meta_adset_id: cleanText(submittedTouch.meta_adset_id, 300),
-      meta_campaign_id: cleanText(submittedTouch.meta_campaign_id, 300),
-      meta_source_url: cleanText(submittedTouch.meta_source_url, 2000),
-      whatsapp_referral_headline: cleanText(
-        submittedTouch.whatsapp_referral_headline,
-        500
-      ),
-      whatsapp_referral_body: cleanText(submittedTouch.whatsapp_referral_body, 1000),
-      whatsapp_referral_source_type: cleanText(
-        submittedTouch.whatsapp_referral_source_type,
-        120
-      ),
-      whatsapp_referral_source_id: cleanText(
-        submittedTouch.whatsapp_referral_source_id,
-        300
-      ),
-      first_seen_at: new Date().toISOString(),
-      last_seen_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (snapshotError || !snapshot) {
-    return rejectPublicSubmit(
-      request,
-      500,
-      "snapshot_create_failed",
-      publicMessages.unavailable,
-      { formToken, normalizedPhone }
-    );
-  }
-
-  const submittedAt = new Date().toISOString();
-
-  const { data: lead, error: leadError } = await supabase
-    .from("leads")
-    .insert({
-      contact_id: contact.id,
-      lead_uid: randomUUID(),
-      source_snapshot_id: snapshot.id,
-      source_type: classification.sourceType,
-      form_id: form.id,
-      brand_id: form.brand_id,
-      treatment_id: treatmentId,
-      package_id: packageRecord.id,
-      branch_id: branchId,
-      customer_name: customerName,
-      phone,
-      normalized_phone: normalizedPhone,
-      appointment_date: appointmentDate,
-      appointment_time: appointmentTime,
-      price: packageDisplayPrice,
-      currency: packageRecord.currency || "HKD",
-      payment_status: paymentStatus,
-      lead_status: isDuplicate ? "duplicate" : "submitted",
-      booking_status: "requested",
-      submitted_at: submittedAt,
-    })
-    .select("id")
-    .single();
-
-  if (leadError || !lead) {
-    return rejectPublicSubmit(
-      request,
-      500,
-      "lead_create_failed",
-      publicMessages.unavailable,
-      { formToken, normalizedPhone }
-    );
-  }
-
-  await supabase
-    .from("lead_source_snapshots")
-    .update({ lead_id: lead.id })
-    .eq("id", snapshot.id);
-
-  await supabase.from("bookings").insert({
-    lead_id: lead.id,
-    contact_id: contact.id,
-    brand_id: form.brand_id,
-    treatment_id: treatmentId,
-    branch_id: branchId,
-    appointment_date: appointmentDate,
-    appointment_time: appointmentTime,
-    booking_status: "requested",
-    created_by_source: classification.sourceType,
-  });
-
-  const legalLinks = getLegalLinks(cleanText(brandRecord?.slug, 120) || "brand");
-  const legalConsentPayload = {
-    consent_event: "legal_consent_accepted",
-    accepted_at: new Date().toISOString(),
-    consent_text: LEGAL_CONSENT_TEXT,
-    privacy_policy_url: legalLinks.privacyPolicyUrl,
-    terms_url: legalLinks.termsUrl,
-    disclaimer_url: legalLinks.disclaimerUrl,
-    form_token: formToken,
-    landing_page_url: cleanText(submittedTouch.landing_page_url, 2000),
-    current_page_url: currentPageUrl,
-    request_origin: normalizeOrigin(request.headers.get("origin")),
+  const rawTrackingData = {
+    first_touch_json: payload.first_touch_json ?? {},
+    latest_touch_json: payload.latest_touch_json ?? {},
+    submitted_touch_json: submittedTouch,
+    source_type: classification.sourceType,
+    attribution_quality: classification.attributionQuality,
+    current_page_url: cleanText(submittedTouch.current_page_url, 2000),
     user_agent: shortUserAgent(request),
   };
 
-  const { error: leadEventsError } = await supabase.from("lead_events").insert([
-    {
-      lead_id: lead.id,
-      contact_id: contact.id,
-      source_snapshot_id: snapshot.id,
-      visitor_id: cleanText(submittedTouch.visitor_id, 120),
-      session_id: cleanText(submittedTouch.session_id, 120),
-      event_type: "form_submit_success",
-      event_payload_json: {
-        source_type: classification.sourceType,
-        is_duplicate: isDuplicate,
-      },
-      page_url: currentPageUrl,
-      referrer: cleanText(submittedTouch.referrer, 2000),
-    },
-    {
-      lead_id: lead.id,
-      contact_id: contact.id,
-      source_snapshot_id: snapshot.id,
-      visitor_id: cleanText(submittedTouch.visitor_id, 120),
-      session_id: cleanText(submittedTouch.session_id, 120),
-      event_type: "form_submit_success",
-      event_payload_json: legalConsentPayload,
-      page_url: currentPageUrl,
-      referrer: cleanText(submittedTouch.referrer, 2000),
-    },
-    {
-      lead_id: lead.id,
-      contact_id: contact.id,
-      source_snapshot_id: snapshot.id,
-      visitor_id: cleanText(submittedTouch.visitor_id, 120),
-      session_id: cleanText(submittedTouch.session_id, 120),
-      event_type: "booking_created",
-      event_payload_json: {
-        booking_status: "requested",
-        created_by_source: classification.sourceType,
-      },
-      page_url: currentPageUrl,
-      referrer: cleanText(submittedTouch.referrer, 2000),
-    },
-    ...(classification.sourceType === "organic_unknown"
-      ? [
-          {
-            lead_id: lead.id,
-            contact_id: contact.id,
-            source_snapshot_id: snapshot.id,
-            visitor_id: cleanText(submittedTouch.visitor_id, 120),
-            session_id: cleanText(submittedTouch.session_id, 120),
-            event_type: "organic_source_assigned",
-            event_payload_json: { audit_reason: classification.auditReason },
-            page_url: currentPageUrl,
-            referrer: cleanText(submittedTouch.referrer, 2000),
-          },
-        ]
-      : []),
-    ...(isDuplicate
-      ? [
-          {
-            lead_id: lead.id,
-            contact_id: contact.id,
-            source_snapshot_id: snapshot.id,
-            event_type: "duplicate_detected",
-            event_payload_json: { duplicate_of_lead_id: recentDuplicate?.id },
-          },
-        ]
-      : []),
-  ]);
+  const snapshotPayload = {
+    utm_source: cleanText(submittedTouch.utm_source, 300),
+    utm_medium: cleanText(submittedTouch.utm_medium, 300),
+    utm_campaign: cleanText(submittedTouch.utm_campaign, 500),
+    utm_content: cleanText(submittedTouch.utm_content, 500),
+    utm_term: cleanText(submittedTouch.utm_term, 500),
+    fbclid: cleanText(submittedTouch.fbclid, 1000),
+    gclid: cleanText(submittedTouch.gclid, 1000),
+    referrer: cleanText(submittedTouch.referrer, 2000),
+    landing_page_url: cleanText(submittedTouch.landing_page_url, 2000),
+    meta_campaign_id: cleanText(submittedTouch.meta_campaign_id, 300),
+    meta_adset_id: cleanText(submittedTouch.meta_adset_id, 300),
+    meta_ad_id: cleanText(submittedTouch.meta_ad_id, 300),
+    source_rule_matched: classification.sourceType,
+    confidence: confidenceFromQuality(classification.attributionQuality),
+    audit_reason: classification.auditReason,
+    tracking_status: classification.trackingStatus,
+    raw_tracking_data: rawTrackingData,
+  };
 
-  if (leadEventsError) {
-    console.warn("[LaunchHub] lead_events_insert_failed", {
-      lead_id: lead.id,
-      code: leadEventsError.code,
-      message: leadEventsError.message,
-    });
-  } else if (isDuplicate) {
-    console.warn("[LaunchHub] google_sheets_sync_skipped", {
-      reason: "duplicate_lead",
-      lead_id: lead.id,
-    });
-  } else {
-    try {
-      const sheetResult = await appendLeadToGoogleSheet({
-        createdAt: submittedAt,
-        customerName,
-        phone: normalizedPhone,
-        email,
-        brandName: brandRecord?.name || "",
-        treatmentName: treatmentRecord.name || "",
-        packageName: packageRecord.name || "",
-        price: packageDisplayPrice,
-        branchName: branchRecord.name || "",
-        appointmentDate,
-        appointmentTime,
-        pageUrl: currentPageUrl,
-        touch: submittedTouch,
-      });
+  const rawFormData = {
+    form_id: form.id,
+    service_id: service.id,
+    service_key: service.key,
+    service_name: service.name,
+    package_id: selectedPackage.id,
+    package_key: selectedPackage.key,
+    package_name: selectedPackage.name,
+    location_id: location.id,
+    location_key: location.key,
+    location_name: location.name,
+    email: email || null,
+    payment_option: payload.payment_option || "booking_only",
+    currency: selectedPackage.currency,
+    source_type: classification.sourceType,
+    legal_consent: {
+      accepted: true,
+      accepted_at: acceptedAt,
+      consent_text: LEGAL_CONSENT_TEXT,
+      privacy_policy_url: legalLinks.privacyPolicyUrl,
+      terms_url: legalLinks.termsUrl,
+      disclaimer_url: legalLinks.disclaimerUrl,
+    },
+  };
 
-      if (sheetResult.skipped) {
-        console.warn("[LaunchHub] google_sheets_sync_skipped", {
-          reason: sheetResult.reason,
-          missing: sheetResult.missing,
-        });
-      }
-    } catch (error) {
-      console.warn("[LaunchHub] google_sheets_sync_failed", {
-        lead_id: lead.id,
-        message: error instanceof Error ? error.message : "unknown_error",
-      });
+  const { data: createdRows, error: createError } = await supabase.rpc(
+    "launchhub_create_lead",
+    {
+      p_form_id: form.id,
+      p_client_id: form.clientId,
+      p_brand_id: form.brandId,
+      p_client_key: form.clientKey,
+      p_brand_key: form.brandKey,
+      p_form_key: form.formKey,
+      p_name: customerName,
+      p_phone: normalizedPhone,
+      p_booking_date: appointmentDate,
+      p_booking_time: appointmentTime,
+      p_location_name: location.name,
+      p_service_name: service.name,
+      p_payment_status: paymentStatus,
+      p_raw_form_data: rawFormData,
+      p_treatment_price: eventValue,
+      p_treatment_price_label: `${selectedPackage.currency} ${eventValue}`,
+      p_is_test_data: form.isTestForm,
+      p_snapshot: snapshotPayload,
     }
+  );
+
+  if (createError || !Array.isArray(createdRows) || !createdRows[0]) {
+    console.error("growthos_launchhub_lead_create_failed", {
+      code: createError?.code || null,
+      contract_missing: isMissingContractFunction(createError),
+      form_key: form.formKey,
+    });
+
+    return rejectPublicSubmit(
+      request,
+      503,
+      isMissingContractFunction(createError)
+        ? "launchhub_contract_not_ready"
+        : "lead_create_failed",
+      publicMessages.unavailable,
+      { formKey: form.formKey, normalizedPhone }
+    );
   }
+
+  const leadId = cleanText(createdRows[0].lead_id, 80) || "";
+  const sourceSnapshotId =
+    cleanText(createdRows[0].source_snapshot_id, 80) || "";
+  const successRedirectUrl =
+    config.conversionMode === "thank_you_redirect"
+      ? buildDerivedSuccessRedirectUrl({
+          baseUrl: config.successRedirectBaseUrl,
+          treatmentSlug: service.slug,
+          eventValue,
+        })
+      : "";
 
   return NextResponse.json(
     {
       ok: true,
-      lead_id: lead.id,
-      contact_id: contact.id,
-      source_snapshot_id: snapshot.id,
+      lead_id: leadId,
+      source_snapshot_id: sourceSnapshotId,
       source_type: classification.sourceType,
       tracking_status: classification.trackingStatus,
       audit_reason: classification.auditReason,
+      success_redirect_url: successRedirectUrl,
+      mode: "growthos_data_contract_v1",
     },
     { status: 201 }
   );
