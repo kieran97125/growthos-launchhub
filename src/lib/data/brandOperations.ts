@@ -17,51 +17,12 @@ export function normalizeBrandSlug(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
 
-export function getBrandPixelId(brandSlug: string | null | undefined) {
-  const slug = normalizeBrandSlug(brandSlug);
-
-  if (slug === "alyssa" || slug.startsWith("alyssa-")) {
-    return process.env.NEXT_PUBLIC_META_PIXEL_ID_ALYSSA?.trim() || "";
-  }
-
-  if (slug === "ineffable" || slug === "ineffable-beauty") {
-    return (
-      process.env.NEXT_PUBLIC_META_PIXEL_ID_INEFFABLE?.trim() ||
-      process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim() ||
-      ""
-    );
-  }
-
-  if (slug === "skin-light" || slug === "skinlight") {
-    return (
-      process.env.NEXT_PUBLIC_META_PIXEL_ID_SKIN_LIGHT?.trim() ||
-      process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim() ||
-      ""
-    );
-  }
-
+export function getBrandPixelId(_brandSlug: string | null | undefined) {
   return process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim() || "";
 }
 
-export function getBrandSuggestedDomains(brandSlug: string | null | undefined) {
-  const slug = normalizeBrandSlug(brandSlug);
-
-  if (slug === "alyssa" || slug.startsWith("alyssa-")) {
-    return ["https://www.alyssa.hk", "https://alyssa.hk"];
-  }
-
-  if (slug === "ineffable" || slug === "ineffable-beauty") {
-    return [
-      "https://www.ineffablebeautyhk.com",
-      "https://ineffablebeautyhk.com",
-    ];
-  }
-
-  if (slug === "skin-light" || slug === "skinlight") {
-    return ["https://www.skinlight.hk", "https://skinlight.hk"];
-  }
-
-  return [];
+export function getBrandSuggestedDomains(_brandSlug: string | null | undefined) {
+  return [] as string[];
 }
 
 function slugSafe(value: string) {
@@ -106,6 +67,8 @@ export function buildWixEmbedCode({
   eventCurrency?: string;
   lazyLoad?: boolean;
 }) {
+  if (!form.publicFormToken) return "";
+
   const safeBrandSlug = slugSafe(brandSlug || "brand");
   const targetId = `launchhub-${safeBrandSlug}-form-${shortToken(
     form.publicFormToken
@@ -152,25 +115,31 @@ export function getFormOperations(config: ConfigurationData, form: FormSetting) 
   const brandSlug = brand?.slug || "brand";
   const pixelId = getBrandPixelId(brandSlug);
   const derivedConfig = deriveFormConfig(config, form);
-  const embedCode = buildWixEmbedCode({
-    form,
-    brandSlug,
-    pixelId,
-    eventValue: derivedConfig.eventValue,
-    eventCurrency: derivedConfig.currency,
-  });
+  const tokenAvailable = Boolean(form.publicFormToken && form.publicTokenAvailable !== false);
+  const embedCode = tokenAvailable
+    ? buildWixEmbedCode({
+        form,
+        brandSlug,
+        pixelId,
+        eventValue: derivedConfig.eventValue,
+        eventCurrency: derivedConfig.currency,
+      })
+    : "";
 
   return {
     brand,
     treatment,
     package: selectedPackage,
     branch,
-    branchLabel: branch?.name || "未設定分店",
+    branchLabel: branch?.name || "未設定地點",
     brandSlug,
     pixelId,
     pixelConfigured: Boolean(pixelId),
+    tokenAvailable,
     embedCode,
-    previewUrl: getPublicEmbedPreviewUrl(form.publicFormToken),
+    previewUrl: tokenAvailable
+      ? getPublicEmbedPreviewUrl(form.publicFormToken)
+      : "",
     packageLabel: packagePriceLabel(selectedPackage),
     suggestedDomains: getBrandSuggestedDomains(brandSlug),
     derivedConfig,
