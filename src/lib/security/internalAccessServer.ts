@@ -3,6 +3,7 @@ import {
   adminSessionCookieName,
   adminSessionMaxAgeSeconds,
   createSignedAdminSession,
+  isAdminPasswordGateEnabled,
   legacyInternalSessionCookieName,
   verifySignedAdminSession,
   type InternalAccessContext,
@@ -16,15 +17,32 @@ function openAccessContext(): InternalAccessContext {
   };
 }
 
-export async function getCurrentInternalAccess(): Promise<InternalAccessContext> {
+async function readSessionVerification() {
+  if (!isAdminPasswordGateEnabled()) {
+    return {
+      ok: true,
+      source: "development_not_configured" as const,
+      reason: null,
+    };
+  }
+
   const cookieStore = await cookies();
-  const result = await verifySignedAdminSession(
+  return verifySignedAdminSession(
     cookieStore.get(adminSessionCookieName)?.value
   );
+}
+
+export async function getCurrentInternalAccess(): Promise<InternalAccessContext> {
+  const result = await readSessionVerification();
 
   return result.ok && result.source
     ? { source: result.source }
     : openAccessContext();
+}
+
+export async function hasVerifiedAdminSession() {
+  const result = await readSessionVerification();
+  return result.ok;
 }
 
 export async function setAdminSessionCookie() {
@@ -59,18 +77,20 @@ export async function clearInternalSessionCookie() {
 
 export async function requireModuleAccess(_module: InternalModule) {
   void _module;
+  const allowed = await hasVerifiedAdminSession();
 
   return {
     access: await getCurrentInternalAccess(),
-    allowed: true,
+    allowed,
   };
 }
 
 export async function requireActionAccess(_action: InternalAction) {
   void _action;
+  const allowed = await hasVerifiedAdminSession();
 
   return {
     access: await getCurrentInternalAccess(),
-    allowed: true,
+    allowed,
   };
 }

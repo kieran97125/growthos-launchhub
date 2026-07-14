@@ -42,6 +42,12 @@ function parseNewFormInput(formData: FormData): ManagedFormInput | string {
     defaultBranchId: readString(formData, "defaultBranchId"),
     allowedDomains: parsedDomains.domains,
     status: "active",
+    conversionMode:
+      readString(formData, "conversionMode") === "thank_you_redirect"
+        ? "thank_you_redirect"
+        : "form_submit_pixel",
+    successRedirectBaseUrl: readString(formData, "successRedirectBaseUrl"),
+    isTestForm: readString(formData, "isTestForm") !== "false",
   };
 }
 

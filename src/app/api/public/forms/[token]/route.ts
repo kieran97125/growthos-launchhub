@@ -1,127 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  alyssaBranches,
-  alyssaBrand,
-  alyssaDefaultForm,
-  alyssaPackages,
-  alyssaTreatments,
-} from "@/lib/data/alyssaConfig";
-import {
-  buildDerivedSuccessRedirectUrl,
-  stripDerivedRedirectParams,
-} from "@/lib/data/derivedFormConfig";
+import { buildDerivedSuccessRedirectUrl } from "@/lib/data/derivedFormConfig";
+import { resolveGrowthOsPublicFormByToken } from "@/lib/data/growthosLaunchhubRepository";
 import {
   createSupabaseAdminClient,
   hasSupabaseAdminEnv,
 } from "@/lib/supabase/admin";
 
-function moneyValue(value: unknown) {
-  const amount = typeof value === "string" ? Number(value) : value;
-  return typeof amount === "number" && Number.isFinite(amount) ? amount : null;
+function invalidFormResponse() {
+  return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
 }
 
-function buildRuntimeDerivedConfig({
-  form,
-  brand,
-  treatment,
-  selectedPackage,
-}: {
-  form: Record<string, unknown>;
-  brand: Record<string, unknown> | null;
-  treatment: Record<string, unknown> | null;
-  selectedPackage: Record<string, unknown> | null;
-}) {
-  const storedRedirectUrl =
-    typeof form.success_redirect_url === "string"
-      ? form.success_redirect_url
-      : typeof form.successRedirectUrl === "string"
-        ? form.successRedirectUrl
-        : "";
-  const storedRedirectBaseUrl = stripDerivedRedirectParams(storedRedirectUrl);
-  const brandBaseUrl =
-    typeof brand?.default_thank_you_url === "string"
-      ? brand.default_thank_you_url
-      : typeof brand?.defaultThankYouUrl === "string"
-        ? brand.defaultThankYouUrl
-        : "";
-  const successRedirectBaseUrl = storedRedirectBaseUrl || brandBaseUrl;
-  const treatmentSlug =
-    (typeof treatment?.slug === "string" && treatment.slug.trim()) || "offer";
-  const eventValue =
-    moneyValue(selectedPackage?.promo_price ?? selectedPackage?.promoPrice) ??
-    moneyValue(selectedPackage?.original_price ?? selectedPackage?.originalPrice);
-  const currency =
-    (typeof selectedPackage?.currency === "string" &&
-      String(selectedPackage.currency).trim().toUpperCase()) ||
-    "HKD";
-  const configuredMode =
-    typeof form.conversion_mode === "string"
-      ? form.conversion_mode
-      : typeof form.conversionMode === "string"
-        ? form.conversionMode
-        : "";
-  const conversionMode =
-    configuredMode === "thank_you_redirect"
-      ? "thank_you_redirect"
-      : configuredMode === "form_submit_pixel"
-        ? "form_submit_pixel"
-        : storedRedirectUrl
-          ? "thank_you_redirect"
-          : "form_submit_pixel";
-  const successRedirectUrl =
-    conversionMode === "thank_you_redirect"
-      ? buildDerivedSuccessRedirectUrl({
-          baseUrl: successRedirectBaseUrl,
-          treatmentSlug,
-          eventValue,
-        })
-      : "";
-
-  return {
-    conversion_mode: conversionMode,
-    success_redirect_base_url: successRedirectBaseUrl,
-    success_redirect_url: successRedirectUrl,
-    treatment_slug: treatmentSlug,
-    event_value: eventValue,
-    currency,
-  };
-}
-
-function isLocalDemoSeedEnabled() {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    process.env.LAUNCHHUB_ENABLE_LOCAL_DEMO_SEED === "true"
+function unavailableResponse() {
+  return NextResponse.json(
+    { ok: false, error: "form_configuration_unavailable" },
+    { status: 503 }
   );
-}
-
-function demoSeedFallbackResponse(mode = "local_demo_seed") {
-  const defaultTreatment =
-    alyssaTreatments.find(
-      (item) => item.id === alyssaDefaultForm.defaultTreatmentId
-    ) ?? null;
-  const defaultPackage =
-    alyssaPackages.find((item) => item.id === alyssaDefaultForm.defaultPackageId) ?? null;
-  const derivedConfig = buildRuntimeDerivedConfig({
-    form: alyssaDefaultForm,
-    brand: alyssaBrand,
-    treatment: defaultTreatment,
-    selectedPackage: defaultPackage,
-  });
-
-  return NextResponse.json({
-    ok: true,
-    form: {
-      ...alyssaDefaultForm,
-      conversion_mode: derivedConfig.conversion_mode,
-      success_redirect_url: derivedConfig.success_redirect_url,
-    },
-    brand: alyssaBrand,
-    treatments: alyssaTreatments,
-    packages: alyssaPackages,
-    branches: alyssaBranches,
-    derived_config: derivedConfig,
-    mode,
-  });
 }
 
 export async function GET(
@@ -130,15 +23,8 @@ export async function GET(
 ) {
   const { token } = await context.params;
 
-  if (
-    token === alyssaDefaultForm.publicFormToken &&
-    isLocalDemoSeedEnabled()
-  ) {
-    return demoSeedFallbackResponse();
-  }
-
   if (!hasSupabaseAdminEnv()) {
-    return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
+    return unavailableResponse();
   }
 
   let supabase: ReturnType<typeof createSupabaseAdminClient>;
@@ -148,71 +34,118 @@ export async function GET(
     console.error("growthos_supabase_boundary_rejected", {
       reason: error instanceof Error ? error.message : "unknown_error",
     });
-    return NextResponse.json(
-      { ok: false, error: "service_configuration_invalid" },
-      { status: 503 }
-    );
+    return unavailableResponse();
   }
 
-  const { data: form, error: formError } = await supabase
-    .from("forms")
-    .select("*")
-    .eq("public_form_token", token)
-    .maybeSingle();
+  const resolution = await resolveGrowthOsPublicFormByToken(supabase, token);
 
-  if (formError || !form) {
-    return NextResponse.json({ ok: false, error: "invalid_form" }, { status: 404 });
+  if (!resolution.ok) {
+    if (resolution.reason === "not_found" || resolution.reason === "invalid_token") {
+      return invalidFormResponse();
+    }
+
+    console.error("growthos_public_form_resolution_failed", {
+      reason: resolution.reason,
+      detail: resolution.detail || null,
+    });
+
+    return resolution.reason === "scope_mismatch"
+      ? invalidFormResponse()
+      : unavailableResponse();
   }
 
-  const [{ data: brand }, { data: treatments }, { data: branches }] =
-    await Promise.all([
-      supabase.from("brands").select("*").eq("id", form.brand_id).single(),
-      supabase
-        .from("treatments")
-        .select("*")
-        .eq("brand_id", form.brand_id)
-        .eq("status", "active")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("branches")
-        .select("*")
-        .eq("brand_id", form.brand_id)
-        .eq("status", "active")
-        .order("created_at", { ascending: true }),
-    ]);
-
-  const treatmentIds = (treatments ?? []).map((item) => item.id);
-  const { data: packages } =
-    treatmentIds.length > 0
-      ? await supabase
-          .from("packages")
-          .select("*")
-          .in("treatment_id", treatmentIds)
-          .eq("status", "active")
-          .order("created_at", { ascending: true })
-      : { data: [] };
-  const defaultTreatment =
-    (treatments ?? []).find((item) => item.id === form.default_treatment_id) ?? null;
-  const defaultPackage =
-    (packages ?? []).find((item) => item.id === form.default_package_id) ?? null;
-  const derivedConfig = buildRuntimeDerivedConfig({
+  const {
     form,
-    brand: brand ?? null,
-    treatment: defaultTreatment,
-    selectedPackage: defaultPackage,
-  });
+    config,
+    brand,
+    defaultService,
+    defaultPackage,
+    defaultLocation,
+  } = resolution.value;
+
+  const eventValue = defaultPackage.promoPrice ?? defaultPackage.originalPrice;
+  const successRedirectUrl =
+    config.conversionMode === "thank_you_redirect"
+      ? buildDerivedSuccessRedirectUrl({
+          baseUrl: config.successRedirectBaseUrl,
+          treatmentSlug: defaultService.slug,
+          eventValue,
+        })
+      : "";
 
   return NextResponse.json({
     ok: true,
     form: {
-      ...form,
-      conversion_mode: derivedConfig.conversion_mode,
-      success_redirect_url: derivedConfig.success_redirect_url,
+      id: form.id,
+      public_form_token: token,
+      brand_id: form.brandId,
+      form_name: form.title,
+      status: form.isActive ? "active" : "inactive",
+      allowed_domains: form.allowedDomains,
+      default_treatment_id: config.defaultServiceId,
+      default_package_id: config.defaultPackageId,
+      default_branch_id: config.defaultLocationId,
+      conversion_mode: config.conversionMode,
+      success_redirect_url: successRedirectUrl,
+      created_at: form.createdAt,
+      updated_at: form.updatedAt,
+      form_key: form.formKey,
+      is_test_form: form.isTestForm,
     },
-    brand,
-    treatments: treatments ?? [],
-    packages: packages ?? [],
-    branches: branches ?? [],
-    derived_config: derivedConfig,
+    brand: {
+      id: brand.id,
+      name: brand.name,
+      slug: brand.slug,
+      brand_code: brand.code,
+      timezone: brand.timezone,
+      default_thank_you_url: config.successRedirectBaseUrl || null,
+    },
+    treatments: [
+      {
+        id: defaultService.id,
+        brand_id: defaultService.brandId,
+        service_key: defaultService.key,
+        name: defaultService.name,
+        slug: defaultService.slug,
+        description: defaultService.description,
+        status: defaultService.status,
+      },
+    ],
+    packages: [
+      {
+        id: defaultPackage.id,
+        brand_id: defaultPackage.brandId,
+        treatment_id: defaultPackage.serviceId,
+        service_id: defaultPackage.serviceId,
+        package_key: defaultPackage.key,
+        name: defaultPackage.name,
+        original_price: defaultPackage.originalPrice,
+        promo_price: defaultPackage.promoPrice,
+        currency: defaultPackage.currency,
+        payment_required: defaultPackage.paymentRequired,
+        status: defaultPackage.status,
+      },
+    ],
+    branches: [
+      {
+        id: defaultLocation.id,
+        brand_id: defaultLocation.brandId,
+        location_key: defaultLocation.key,
+        name: defaultLocation.name,
+        slug: defaultLocation.slug,
+        address: defaultLocation.address,
+        opening_hours: defaultLocation.openingHours,
+        status: defaultLocation.status,
+      },
+    ],
+    derived_config: {
+      conversion_mode: config.conversionMode,
+      success_redirect_base_url: config.successRedirectBaseUrl,
+      success_redirect_url: successRedirectUrl,
+      treatment_slug: defaultService.slug,
+      event_value: eventValue,
+      currency: defaultPackage.currency,
+    },
+    mode: "growthos_data_contract_v1",
   });
 }
