@@ -145,7 +145,9 @@ export function deriveFormConfig(config: ConfigurationData, form: FormSetting): 
     eventValue,
   });
   const conversionMode: FormConversionMode =
-    form.conversionMode === "thank_you_redirect" || Boolean(storedRedirectUrl)
+    form.conversionMode === "thank_you_redirect" ||
+    Boolean(storedRedirectUrl) ||
+    Boolean(brandBaseUrl)
       ? "thank_you_redirect"
       : "form_submit_pixel";
   const staleReasons = getStaleReasons({
