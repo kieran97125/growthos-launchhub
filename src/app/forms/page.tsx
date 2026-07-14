@@ -1,7 +1,6 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { AppNav } from "@/components/alyssa/AppNav";
 import { CopyButton } from "@/components/alyssa/CopyButton";
-import { duplicateFormAction } from "@/app/forms/actions";
 import { getFormOperations } from "@/lib/data/brandOperations";
 import {
   getConfigurationData,
@@ -29,6 +28,7 @@ function formMatchesSearch(form: FormSetting, search: string) {
   return (
     form.formName.toLowerCase().includes(needle) ||
     form.publicFormToken.toLowerCase().includes(needle) ||
+    (form.publicFormTokenHash || "").toLowerCase().includes(needle) ||
     form.id.toLowerCase().includes(needle)
   );
 }
@@ -51,7 +51,6 @@ export default async function FormsPage({
       (item) => item.slug === selectedBrand || item.id === selectedBrand
     ) ?? null;
   const filteredForms = config.forms.filter((form) => {
-    const ops = getFormOperations(config, form);
     if (brand && form.brandId !== brand.id) return false;
     if (selectedTreatment && form.defaultTreatmentId !== selectedTreatment) {
       return false;
@@ -73,16 +72,13 @@ export default async function FormsPage({
                 Forms / 表格管理
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                按品牌、療程、分店及狀態管理 Campaign Forms。每個 Form 都有 Public Token、Wix embed snippet、test URL 及來源捕捉設定。
+                Growth OS Form identity 只儲存 Public Token hash。舊 token 無法由資料庫還原；新 token 必須透過正式輪替流程生成並只顯示一次。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/forms/new${brand ? `?brand=${brand.slug}` : ""}`}
-                className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.18)]"
-              >
-                建立 Wix Form
-              </Link>
+              <span className="cursor-not-allowed rounded-full bg-slate-200 px-5 py-3 text-sm font-bold text-slate-500">
+                建立 Form · 待原生 Token Flow
+              </span>
               <Link
                 href="/brands"
                 className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700"
@@ -92,6 +88,13 @@ export default async function FormsPage({
             </div>
           </div>
         </header>
+
+        <section className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4">
+          <p className="text-sm font-bold text-sky-900">安全唯讀階段</p>
+          <p className="mt-1 text-sm leading-6 text-sky-800">
+            Schema、tenant scope 同 public capture contract 已進入 Preview review；建立、複製、修改及 token 輪替暫時關閉，避免任何操作寫入舊 Alyssa-shaped tables。
+          </p>
+        </section>
 
         {message && (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
@@ -114,7 +117,7 @@ export default async function FormsPage({
               }))}
             />
             <FilterSelect
-              label="Treatment"
+              label="Service"
               name="treatment"
               value={selectedTreatment}
               options={config.treatments
@@ -122,7 +125,7 @@ export default async function FormsPage({
                 .map((item) => ({ value: item.id, label: item.name }))}
             />
             <FilterSelect
-              label="Branch"
+              label="Location"
               name="branch"
               value={selectedBranch}
               options={config.branches
@@ -144,7 +147,7 @@ export default async function FormsPage({
               <input
                 name="q"
                 defaultValue={search}
-                placeholder="Form name / token / ID"
+                placeholder="Form name / hash / ID"
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none focus:border-sky-400 focus:bg-white"
               />
             </label>
@@ -162,9 +165,9 @@ export default async function FormsPage({
                   {[
                     "Form name",
                     "Brand",
-                    "Treatment / package",
-                    "Branch",
-                    "Form token",
+                    "Service / package",
+                    "Location",
+                    "Token state",
                     "Status",
                     "Updated",
                     "Actions",
@@ -199,7 +202,7 @@ export default async function FormsPage({
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
                         <p className="font-semibold text-slate-700">
-                          {ops.treatment?.name || "未設定療程"}
+                          {ops.treatment?.name || "未設定服務"}
                         </p>
                         <p className="mt-1 text-xs font-bold text-slate-950">
                           {ops.packageLabel}
@@ -209,9 +212,22 @@ export default async function FormsPage({
                         {ops.branchLabel}
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
-                        <p className="max-w-[250px] break-all font-mono text-xs font-bold text-slate-700">
-                          {form.publicFormToken}
-                        </p>
+                        {ops.tokenAvailable ? (
+                          <p className="max-w-[250px] break-all font-mono text-xs font-bold text-slate-700">
+                            {form.publicFormToken}
+                          </p>
+                        ) : (
+                          <div>
+                            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+                              Protected hash only
+                            </span>
+                            <p className="mt-2 max-w-[250px] break-all font-mono text-[10px] text-slate-400">
+                              {form.publicFormTokenHash
+                                ? `${form.publicFormTokenHash.slice(0, 12)}…`
+                                : "No token hash"}
+                            </p>
+                          </div>
+                        )}
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
                         <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -223,34 +239,30 @@ export default async function FormsPage({
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
                         <div className="flex min-w-[280px] flex-wrap gap-2">
-                          <CopyButton value={ops.embedCode} label="Copy Wix Embed" />
-                          <Link
-                            href={`/embed/${form.publicFormToken}`}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
-                          >
-                            Test Form
-                          </Link>
+                          {ops.tokenAvailable ? (
+                            <>
+                              <CopyButton value={ops.embedCode} label="Copy Wix Embed" />
+                              <Link
+                                href={`/embed/${form.publicFormToken}`}
+                                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                              >
+                                Test Form
+                              </Link>
+                            </>
+                          ) : (
+                            <span className="cursor-not-allowed rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-400">
+                              Token rotation required
+                            </span>
+                          )}
                           <Link
                             href={`/forms/${form.id}`}
                             className="rounded-full bg-slate-950 px-3 py-1.5 text-xs font-bold text-white"
                           >
                             Detail
                           </Link>
-                          <Link
-                            href={`/leads?form=${form.publicFormToken}`}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
-                          >
-                            Leads
-                          </Link>
-                          <form action={duplicateFormAction}>
-                            <input type="hidden" name="formId" value={form.id} />
-                            <button
-                              type="submit"
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
-                            >
-                              Duplicate
-                            </button>
-                          </form>
+                          <span className="cursor-not-allowed rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-400">
+                            Duplicate disabled
+                          </span>
                         </div>
                       </td>
                     </tr>
@@ -259,7 +271,9 @@ export default async function FormsPage({
                 {filteredForms.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-4 py-10 text-center text-sm font-semibold text-slate-500">
-                      未找到符合條件嘅 Form。可以調整篩選或建立新 Wix Form。
+                      {config.sourceLabel === "Growth OS LaunchHub schema 尚未啟用"
+                        ? "LaunchHub data contract 尚未套用；目前安全顯示空資料。"
+                        : "未找到符合條件嘅 Form。"}
                     </td>
                   </tr>
                 )}
