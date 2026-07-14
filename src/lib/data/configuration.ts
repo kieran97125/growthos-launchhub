@@ -47,6 +47,8 @@ export type BranchSetting = {
 export type FormSetting = {
   id: string;
   publicFormToken: string;
+  publicFormTokenHash?: string;
+  publicTokenAvailable?: boolean;
   brandId: string;
   formName: string;
   status: string;
@@ -134,6 +136,19 @@ function asTextArray(value: unknown) {
     : [];
 }
 
+function text(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function slugFromBrandCode(value: unknown) {
+  return (
+    text(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "brand"
+  );
+}
+
 function moneyValue(value: number | string | null | undefined, currency = "HKD") {
   const amount = typeof value === "string" ? Number(value) : value;
   if (typeof amount !== "number" || !Number.isFinite(amount)) return "未設定";
@@ -187,110 +202,129 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
 
   try {
     const supabase = createSupabaseAdminClient();
-    const [brands, treatments, packages, branches, forms] = await Promise.all([
-      supabase
-        .from("brands")
-        .select("id,name,slug,primary_color,secondary_color,whatsapp_number,default_thank_you_url")
-        .order("name", { ascending: true }),
-      supabase
-        .from("treatments")
-        .select("id,brand_id,name,slug,description,status")
-        .order("name", { ascending: true }),
-      supabase
-        .from("packages")
-        .select("id,treatment_id,name,original_price,promo_price,currency,payment_required,status")
-        .order("name", { ascending: true }),
-      supabase
-        .from("branches")
-        .select("id,brand_id,name,slug,address,opening_hours,status")
-        .order("name", { ascending: true }),
-      supabase.from("forms").select("*").order("form_name", { ascending: true }),
-    ]);
+    const [brands, services, packages, locations, leadForms, formConfigs] =
+      await Promise.all([
+        supabase
+          .from("brands")
+          .select("id,client_id,brand_code,brand_name,status")
+          .eq("status", "active")
+          .order("brand_name", { ascending: true }),
+        supabase
+          .from("launchhub_services")
+          .select("id,client_id,brand_id,name,slug,description,status")
+          .order("name", { ascending: true }),
+        supabase
+          .from("launchhub_packages")
+          .select(
+            "id,client_id,brand_id,service_id,name,original_price,promo_price,currency,payment_required,status"
+          )
+          .order("name", { ascending: true }),
+        supabase
+          .from("launchhub_locations")
+          .select("id,client_id,brand_id,name,slug,address,opening_hours,status")
+          .order("name", { ascending: true }),
+        supabase
+          .from("lead_forms")
+          .select(
+            "id,client_id,brand_id,public_form_token_hash,title,is_active,allowed_domains,created_at,updated_at"
+          )
+          .order("title", { ascending: true }),
+        supabase
+          .from("launchhub_form_configs")
+          .select(
+            "lead_form_id,client_id,brand_id,default_service_id,default_package_id,default_location_id,conversion_mode,success_redirect_base_url"
+          ),
+      ]);
 
-    if (brands.error) throw brands.error;
-    if (treatments.error) throw treatments.error;
-    if (packages.error) throw packages.error;
-    if (branches.error) throw branches.error;
-    if (forms.error) throw forms.error;
+    const firstError = [
+      brands.error,
+      services.error,
+      packages.error,
+      locations.error,
+      leadForms.error,
+      formConfigs.error,
+    ].find(Boolean);
+
+    if (firstError) throw firstError;
+
+    const configsByFormId = new Map(
+      (formConfigs.data ?? []).map((row) => [String(row.lead_form_id), row])
+    );
+
+    const brandSettings: BrandSetting[] = (brands.data ?? []).map((row) => ({
+      id: text(row.id),
+      name: text(row.brand_name) || "未命名品牌",
+      slug: slugFromBrandCode(row.brand_code),
+      primaryColor: null,
+      secondaryColor: null,
+      whatsappNumber: null,
+      defaultThankYouUrl: null,
+    }));
 
     return {
-      sourceLabel: "Growth OS 正式設定",
-      brands: ((brands.data ?? []) as unknown[]).map((item) => {
-        const row = item as Record<string, string | null>;
-        return {
-          id: row.id ?? "",
-          name: row.name ?? "未命名品牌",
-          slug: row.slug ?? "",
-          primaryColor: row.primary_color ?? null,
-          secondaryColor: row.secondary_color ?? null,
-          whatsappNumber: row.whatsapp_number ?? null,
-          defaultThankYouUrl: row.default_thank_you_url ?? null,
-        };
-      }),
-      treatments: ((treatments.data ?? []) as unknown[]).map((item) => {
-        const row = item as Record<string, string | null>;
-        return {
-          id: row.id ?? "",
-          brandId: row.brand_id ?? "",
-          name: row.name ?? "未命名服務",
-          slug: row.slug ?? "",
-          description: row.description ?? null,
-          status: row.status ?? "active",
-        };
-      }),
-      packages: ((packages.data ?? []) as unknown[]).map((item) => {
-        const row = item as Record<string, string | number | boolean | null>;
-        return {
-          id: String(row.id ?? ""),
-          treatmentId: String(row.treatment_id ?? ""),
-          name: String(row.name ?? "未命名套餐"),
-          originalPrice:
-            typeof row.original_price === "number" || typeof row.original_price === "string"
-              ? row.original_price
-              : null,
-          promoPrice:
-            typeof row.promo_price === "number" || typeof row.promo_price === "string"
-              ? row.promo_price
-              : null,
-          currency: String(row.currency ?? "HKD"),
-          paymentRequired: Boolean(row.payment_required),
-          status: String(row.status ?? "active"),
-        };
-      }),
-      branches: ((branches.data ?? []) as unknown[]).map((item) => {
-        const row = item as Record<string, unknown>;
-        return {
-          id: String(row.id ?? ""),
-          brandId: String(row.brand_id ?? ""),
-          name: String(row.name ?? "未命名分店"),
-          slug: String(row.slug ?? ""),
-          address: typeof row.address === "string" ? row.address : null,
-          openingHours: row.opening_hours ? JSON.stringify(row.opening_hours) : null,
-          status: String(row.status ?? "active"),
-        };
-      }),
-      forms: ((forms.data ?? []) as unknown[]).map((item) => {
-        const row = item as Record<string, unknown>;
-        return {
-          id: String(row.id ?? ""),
-          publicFormToken: String(row.public_form_token ?? ""),
-          brandId: String(row.brand_id ?? ""),
-          formName: String(row.form_name ?? "未命名表格"),
-          status: String(row.status ?? "active"),
-          allowedDomains: asTextArray(row.allowed_domains),
-          defaultTreatmentId:
-            typeof row.default_treatment_id === "string" ? row.default_treatment_id : null,
-          defaultPackageId:
-            typeof row.default_package_id === "string" ? row.default_package_id : null,
-          defaultBranchId:
-            typeof row.default_branch_id === "string" ? row.default_branch_id : null,
-          conversionMode:
-            typeof row.conversion_mode === "string" ? row.conversion_mode : null,
-          successRedirectUrl:
-            typeof row.success_redirect_url === "string" ? row.success_redirect_url : null,
-          createdAt: typeof row.created_at === "string" ? row.created_at : null,
-          updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
-        };
+      sourceLabel: "Growth OS LaunchHub data contract v1",
+      brands: brandSettings,
+      treatments: (services.data ?? []).map((row) => ({
+        id: text(row.id),
+        brandId: text(row.brand_id),
+        name: text(row.name) || "未命名服務",
+        slug: text(row.slug) || "service",
+        description: text(row.description) || null,
+        status: text(row.status) || "active",
+      })),
+      packages: (packages.data ?? []).map((row) => ({
+        id: text(row.id),
+        treatmentId: text(row.service_id),
+        name: text(row.name) || "未命名套餐",
+        originalPrice:
+          typeof row.original_price === "number" ||
+          typeof row.original_price === "string"
+            ? row.original_price
+            : null,
+        promoPrice:
+          typeof row.promo_price === "number" ||
+          typeof row.promo_price === "string"
+            ? row.promo_price
+            : null,
+        currency: text(row.currency).toUpperCase() || "HKD",
+        paymentRequired: Boolean(row.payment_required),
+        status: text(row.status) || "active",
+      })),
+      branches: (locations.data ?? []).map((row) => ({
+        id: text(row.id),
+        brandId: text(row.brand_id),
+        name: text(row.name) || "未命名地點",
+        slug: text(row.slug) || "location",
+        address: text(row.address) || null,
+        openingHours: row.opening_hours
+          ? JSON.stringify(row.opening_hours)
+          : null,
+        status: text(row.status) || "active",
+      })),
+      forms: (leadForms.data ?? []).flatMap((row) => {
+        const config = configsByFormId.get(String(row.id));
+        if (!config) return [];
+
+        return [
+          {
+            id: text(row.id),
+            publicFormToken: "",
+            publicFormTokenHash: text(row.public_form_token_hash),
+            publicTokenAvailable: false,
+            brandId: text(row.brand_id),
+            formName: text(row.title) || "未命名表格",
+            status: row.is_active ? "active" : "inactive",
+            allowedDomains: asTextArray(row.allowed_domains),
+            defaultTreatmentId: text(config.default_service_id) || null,
+            defaultPackageId: text(config.default_package_id) || null,
+            defaultBranchId: text(config.default_location_id) || null,
+            conversionMode: text(config.conversion_mode) || "form_submit_pixel",
+            successRedirectUrl:
+              text(config.success_redirect_base_url) || null,
+            createdAt: text(row.created_at) || null,
+            updatedAt: text(row.updated_at) || null,
+          },
+        ];
       }),
       templates: landingPageTemplates,
       landingPages: [],
@@ -299,6 +333,6 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
     console.error("growthos_configuration_read_failed", {
       reason: error instanceof Error ? error.message : "unknown_error",
     });
-    return emptyConfiguration("Growth OS 設定暫時未能讀取");
+    return emptyConfiguration("Growth OS LaunchHub schema 尚未啟用");
   }
 }
