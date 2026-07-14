@@ -7,18 +7,97 @@ import {
   alyssaTreatments,
 } from "@/lib/data/alyssaConfig";
 import {
+  buildDerivedSuccessRedirectUrl,
+  stripDerivedRedirectParams,
+} from "@/lib/data/derivedFormConfig";
+import {
   createSupabaseAdminClient,
   hasSupabaseAdminEnv,
 } from "@/lib/supabase/admin";
 
+function moneyValue(value: unknown) {
+  const amount = typeof value === "string" ? Number(value) : value;
+  return typeof amount === "number" && Number.isFinite(amount) ? amount : null;
+}
+
+function buildRuntimeDerivedConfig({
+  form,
+  brand,
+  treatment,
+  selectedPackage,
+}: {
+  form: Record<string, unknown>;
+  brand: Record<string, unknown> | null;
+  treatment: Record<string, unknown> | null;
+  selectedPackage: Record<string, unknown> | null;
+}) {
+  const storedRedirectUrl =
+    typeof form.success_redirect_url === "string" ? form.success_redirect_url : "";
+  const brandBaseUrl =
+    typeof brand?.default_thank_you_url === "string"
+      ? brand.default_thank_you_url
+      : typeof brand?.defaultThankYouUrl === "string"
+        ? brand.defaultThankYouUrl
+        : "";
+  const successRedirectBaseUrl =
+    brandBaseUrl || stripDerivedRedirectParams(storedRedirectUrl);
+  const treatmentSlug =
+    (typeof treatment?.slug === "string" && treatment.slug.trim()) || "offer";
+  const eventValue =
+    moneyValue(selectedPackage?.promo_price ?? selectedPackage?.promoPrice) ??
+    moneyValue(selectedPackage?.original_price ?? selectedPackage?.originalPrice);
+  const currency =
+    (typeof (selectedPackage?.currency) === "string" &&
+      String(selectedPackage.currency).trim().toUpperCase()) ||
+    "HKD";
+  const successRedirectUrl = buildDerivedSuccessRedirectUrl({
+    baseUrl: successRedirectBaseUrl,
+    treatmentSlug,
+    eventValue,
+  });
+  const conversionMode =
+    form.conversion_mode === "thank_you_redirect" ||
+    Boolean(storedRedirectUrl) ||
+    Boolean(brandBaseUrl)
+      ? "thank_you_redirect"
+      : "form_submit_pixel";
+
+  return {
+    conversion_mode: conversionMode,
+    success_redirect_base_url: successRedirectBaseUrl,
+    success_redirect_url: successRedirectUrl,
+    treatment_slug: treatmentSlug,
+    event_value: eventValue,
+    currency,
+  };
+}
+
 function demoSeedFallbackResponse(mode = "demo_seed_fallback") {
+  const defaultTreatment =
+    alyssaTreatments.find(
+      (item) => item.id === alyssaDefaultForm.defaultTreatmentId
+    ) ?? null;
+  const defaultPackage =
+    alyssaPackages.find((item) => item.id === alyssaDefaultForm.defaultPackageId) ?? null;
+  const derivedConfig = buildRuntimeDerivedConfig({
+    form: alyssaDefaultForm,
+    brand: alyssaBrand,
+    treatment: defaultTreatment,
+    selectedPackage: defaultPackage,
+  });
+
   return NextResponse.json({
     ok: true,
-    form: alyssaDefaultForm,
+    form: {
+      ...alyssaDefaultForm,
+      conversion_mode: derivedConfig.conversion_mode,
+      success_redirect_url: derivedConfig.success_redirect_url,
+    },
     brand: alyssaBrand,
     treatments: alyssaTreatments,
     packages: alyssaPackages,
     branches: alyssaBranches,
+    derived_config: derivedConfig,
     mode,
   });
 }
@@ -75,13 +154,28 @@ export async function GET(
           .eq("status", "active")
           .order("created_at", { ascending: true })
       : { data: [] };
+  const defaultTreatment =
+    (treatments ?? []).find((item) => item.id === form.default_treatment_id) ?? null;
+  const defaultPackage =
+    (packages ?? []).find((item) => item.id === form.default_package_id) ?? null;
+  const derivedConfig = buildRuntimeDerivedConfig({
+    form,
+    brand: brand ?? null,
+    treatment: defaultTreatment,
+    selectedPackage: defaultPackage,
+  });
 
   return NextResponse.json({
     ok: true,
-    form,
+    form: {
+      ...form,
+      conversion_mode: derivedConfig.conversion_mode,
+      success_redirect_url: derivedConfig.success_redirect_url,
+    },
     brand,
     treatments: treatments ?? [],
     packages: packages ?? [],
     branches: branches ?? [],
+    derived_config: derivedConfig,
   });
 }
