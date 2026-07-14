@@ -3,8 +3,7 @@
 
 begin;
 
--- Active public forms must have a real tenant scope, a valid SHA-256 token hash,
--- and at least one explicitly approved origin.
+-- Public form tokens are SHA-256 capability hashes.
 do $$
 begin
   if not exists (
@@ -15,24 +14,78 @@ begin
       add constraint lead_forms_launchhub_token_hash_check
       check (public_form_token_hash ~ '^[0-9a-f]{64}$');
   end if;
-
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'lead_forms_launchhub_active_scope_check'
-  ) then
-    alter table public.lead_forms
-      add constraint lead_forms_launchhub_active_scope_check
-      check (
-        not is_active
-        or (
-          client_id is not null
-          and brand_id is not null
-          and cardinality(allowed_domains) > 0
-        )
-      );
-  end if;
 end;
 $$;
+
+-- The shared lead_forms table contains older unconfigured test rows. Enforce
+-- strict scope and allowed-origin rules only when a form is attached to a
+-- LaunchHub v1 form config.
+create or replace function public.launchhub_validate_configured_form_security()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  form_client_id uuid;
+  form_brand_id uuid;
+  form_token_hash text;
+  form_allowed_domains text[];
+  form_id uuid;
+begin
+  if tg_table_name = 'launchhub_form_configs' then
+    form_id := new.lead_form_id;
+
+    select f.client_id, f.brand_id, f.public_form_token_hash, f.allowed_domains
+    into form_client_id, form_brand_id, form_token_hash, form_allowed_domains
+    from public.lead_forms f
+    where f.id = form_id;
+  else
+    form_id := new.id;
+
+    if not exists (
+      select 1
+      from public.launchhub_form_configs c
+      where c.lead_form_id = form_id
+    ) then
+      return new;
+    end if;
+
+    form_client_id := new.client_id;
+    form_brand_id := new.brand_id;
+    form_token_hash := new.public_form_token_hash;
+    form_allowed_domains := new.allowed_domains;
+  end if;
+
+  if form_client_id is null or form_brand_id is null then
+    raise exception 'launchhub_configured_form_scope_missing';
+  end if;
+
+  if form_token_hash is null or form_token_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'launchhub_configured_form_token_invalid';
+  end if;
+
+  if coalesce(cardinality(form_allowed_domains), 0) = 0 then
+    raise exception 'launchhub_configured_form_allowed_domains_missing';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists launchhub_form_configs_security_check
+  on public.launchhub_form_configs;
+create trigger launchhub_form_configs_security_check
+before insert or update on public.launchhub_form_configs
+for each row execute function public.launchhub_validate_configured_form_security();
+
+drop trigger if exists lead_forms_launchhub_security_check
+  on public.lead_forms;
+create trigger lead_forms_launchhub_security_check
+before update on public.lead_forms
+for each row execute function public.launchhub_validate_configured_form_security();
+
+revoke execute on function public.launchhub_validate_configured_form_security()
+  from public, anon, authenticated;
 
 -- LaunchHub tables are server-owned. RLS remains enabled, and no browser role
 -- receives direct table privileges.
