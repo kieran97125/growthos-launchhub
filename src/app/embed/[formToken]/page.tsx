@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
-import { PublicLeadForm } from "@/components/alyssa/PublicLeadForm";
+import { GrowthOsPublicLeadForm } from "@/components/public/GrowthOsPublicLeadForm";
 
 function normalizeOrigin(value: string | null) {
   if (!value) return "";
@@ -19,11 +19,10 @@ export default function EmbedFormPage() {
 
   return (
     <main className="min-h-screen bg-[var(--public-bg)]">
-      <PublicLeadForm
+      <GrowthOsPublicLeadForm
         mode="embed"
         formToken={params.formToken}
         formId={searchParams.get("form_id") || undefined}
-        brandSlug={searchParams.get("brand") || undefined}
         expectedParentOrigin={normalizeOrigin(searchParams.get("parent_origin"))}
       />
     </main>
