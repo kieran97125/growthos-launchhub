@@ -7,6 +7,7 @@ import {
   type ConfigurationData,
   type FormSetting,
 } from "@/lib/data/configuration";
+import { deriveFormConfig } from "@/lib/data/derivedFormConfig";
 import { getPublicEmbedPreviewUrl, getPublicPathUrl } from "@/lib/data/appUrl";
 
 export const META_URL_PARAMETER_GUIDE =
@@ -46,30 +47,21 @@ export function getBrandSuggestedDomains(brandSlug: string | null | undefined) {
   const slug = normalizeBrandSlug(brandSlug);
 
   if (slug === "alyssa" || slug.startsWith("alyssa-")) {
-    return [
-      "https://www.alyssa.hk",
-      "https://alyssa.hk",
-      "https://go.beautytrialhk.com",
-    ];
+    return ["https://www.alyssa.hk", "https://alyssa.hk"];
   }
 
   if (slug === "ineffable" || slug === "ineffable-beauty") {
     return [
       "https://www.ineffablebeautyhk.com",
       "https://ineffablebeautyhk.com",
-      "https://go.beautytrialhk.com",
     ];
   }
 
   if (slug === "skin-light" || slug === "skinlight") {
-    return [
-      "https://www.skinlight.hk",
-      "https://skinlight.hk",
-      "https://go.beautytrialhk.com",
-    ];
+    return ["https://www.skinlight.hk", "https://skinlight.hk"];
   }
 
-  return ["https://go.beautytrialhk.com"];
+  return [];
 }
 
 function slugSafe(value: string) {
@@ -93,17 +85,25 @@ function escapeHtmlAttr(value: string | number | null | undefined) {
     .replace(/>/g, "&gt;");
 }
 
+function validPixelValue(value: number | string | null | undefined) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
 export function buildWixEmbedCode({
   form,
   brandSlug,
   pixelId,
   eventValue,
+  eventCurrency = "HKD",
   lazyLoad = true,
 }: {
   form: FormSetting;
   brandSlug: string;
   pixelId?: string;
   eventValue?: number | string | null;
+  eventCurrency?: string;
   lazyLoad?: boolean;
 }) {
   const safeBrandSlug = slugSafe(brandSlug || "brand");
@@ -114,7 +114,7 @@ export function buildWixEmbedCode({
     `<div id="${escapeHtmlAttr(targetId)}"></div>`,
     "",
     `<script`,
-    `  src="${escapeHtmlAttr(getPublicPathUrl("/embed/launchhub-form.js?v=20260626-lazy"))}"`,
+    `  src="${escapeHtmlAttr(getPublicPathUrl("/embed/launchhub-form.js?v=20260714-derived"))}"`,
     `  data-form-token="${escapeHtmlAttr(form.publicFormToken)}"`,
     `  data-brand="${escapeHtmlAttr(safeBrandSlug)}"`,
     `  data-form-id="${escapeHtmlAttr(form.id)}"`,
@@ -122,10 +122,15 @@ export function buildWixEmbedCode({
 
   if (pixelId) {
     lines.push(`  data-pixel-id="${escapeHtmlAttr(pixelId)}"`);
-    lines.push(
-      `  data-pixel-event-value="${escapeHtmlAttr(eventValue || 388)}"`
-    );
-    lines.push(`  data-pixel-currency="HKD"`);
+    const amount = validPixelValue(eventValue);
+    if (amount !== null) {
+      lines.push(`  data-pixel-event-value="${escapeHtmlAttr(amount)}"`);
+      lines.push(
+        `  data-pixel-currency="${escapeHtmlAttr(
+          eventCurrency.trim().toUpperCase() || "HKD"
+        )}"`
+      );
+    }
   }
 
   if (lazyLoad) {
@@ -146,11 +151,13 @@ export function getFormOperations(config: ConfigurationData, form: FormSetting) 
   const branch = getBranch(config, form.defaultBranchId);
   const brandSlug = brand?.slug || "brand";
   const pixelId = getBrandPixelId(brandSlug);
+  const derivedConfig = deriveFormConfig(config, form);
   const embedCode = buildWixEmbedCode({
     form,
     brandSlug,
     pixelId,
-    eventValue: selectedPackage?.promoPrice,
+    eventValue: derivedConfig.eventValue,
+    eventCurrency: derivedConfig.currency,
   });
 
   return {
@@ -166,5 +173,6 @@ export function getFormOperations(config: ConfigurationData, form: FormSetting) 
     previewUrl: getPublicEmbedPreviewUrl(form.publicFormToken),
     packageLabel: packagePriceLabel(selectedPackage),
     suggestedDomains: getBrandSuggestedDomains(brandSlug),
+    derivedConfig,
   };
 }
