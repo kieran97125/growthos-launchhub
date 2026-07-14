@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppNav } from "@/components/alyssa/AppNav";
 import { CopyButton } from "@/components/alyssa/CopyButton";
@@ -9,7 +9,6 @@ import {
   getFormOperations,
 } from "@/lib/data/brandOperations";
 import {
-  getBrand,
   getPackage,
   getTreatment,
   packagePriceLabel,
@@ -26,6 +25,17 @@ function formatDate(value: string | null | undefined) {
     timeStyle: "short",
     timeZone: "Asia/Hong_Kong",
   }).format(new Date(value));
+}
+
+function staleReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    stored_redirect_invalid: "已儲存 redirect 格式無效",
+    submitted_flag_stale: "submitted 參數未同步",
+    treatment_slug_stale: "treatment slug 已過期",
+    offer_value_stale: "offer value 已過期",
+    redirect_base_stale: "thank-you base URL 已改變",
+  };
+  return labels[reason] || reason;
 }
 
 export default async function FormConfigPage({
@@ -56,6 +66,11 @@ export default async function FormConfigPage({
     treatmentIds.has(item.treatmentId)
   );
   const brandBranches = config.branches.filter((item) => item.brandId === form.brandId);
+  const derivedStatus = ops.derivedConfig.storedRedirectIsStale
+    ? "Needs sync"
+    : ops.derivedConfig.successRedirectUrl
+      ? "Current"
+      : "Not configured";
 
   return (
     <main className="alyssa-shell">
@@ -95,7 +110,7 @@ export default async function FormConfigPage({
           </div>
         )}
 
-        <section className="mt-6 grid gap-5 lg:grid-cols-4">
+        <section className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
           <StatusCard label="Brand" value={ops.brand?.name || "未設定"} />
           <StatusCard label="Treatment" value={ops.treatment?.name || "未設定"} />
           <StatusCard label="Package" value={ops.packageLabel} />
@@ -103,6 +118,11 @@ export default async function FormConfigPage({
             label="Pixel"
             value={ops.pixelConfigured ? ops.pixelId : "Missing"}
             warning={!ops.pixelConfigured}
+          />
+          <StatusCard
+            label="Derived config"
+            value={derivedStatus}
+            warning={ops.derivedConfig.storedRedirectIsStale}
           />
         </section>
 
@@ -168,7 +188,9 @@ export default async function FormConfigPage({
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
               />
               <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
-                建議：{ops.suggestedDomains.join(", ")}. 只填網站 origin，不要填完整 tracking URL。
+                {ops.suggestedDomains.length > 0
+                  ? `建議：${ops.suggestedDomains.join(", ")}。只填網站 origin，不要填完整 tracking URL。`
+                  : "請填客戶實際網站 origin；不要使用其他客戶或平台示例 domain。"}
               </span>
             </label>
 
@@ -179,6 +201,12 @@ export default async function FormConfigPage({
                 <InfoCell label="Updated" value={formatDate(form.updatedAt)} />
                 <InfoCell label="Branch" value={ops.branchLabel} />
                 <InfoCell label="Test URL" value={ops.previewUrl} mono />
+                <InfoCell label="Conversion mode" value={ops.derivedConfig.conversionMode} />
+                <InfoCell
+                  label="Derived success redirect"
+                  value={ops.derivedConfig.successRedirectUrl || "未設定 thank-you URL"}
+                  mono
+                />
                 <InfoCell
                   label="Landing Pages"
                   value={
@@ -200,16 +228,65 @@ export default async function FormConfigPage({
               <CopyButton value={ops.embedCode} label="Copy Wix Embed" />
               <CopyButton value={form.publicFormToken} label="Copy Token" />
               <CopyButton value={ops.previewUrl} label="Copy Test URL" />
+              {ops.derivedConfig.successRedirectUrl ? (
+                <CopyButton
+                  value={ops.derivedConfig.successRedirectUrl}
+                  label="Copy Success Redirect"
+                />
+              ) : null}
             </div>
           </form>
 
           <aside className="grid h-fit min-w-0 gap-5">
+            <section
+              className={`alyssa-premium-card min-w-0 border p-5 ${
+                ops.derivedConfig.storedRedirectIsStale
+                  ? "border-amber-300 bg-amber-50/80"
+                  : "border-emerald-200 bg-emerald-50/60"
+              }`}
+            >
+              <p className="alyssa-kicker">Derived configuration</p>
+              <h2 className="mt-2 text-xl font-bold text-slate-950">
+                Redirect / Pixel 一致性
+              </h2>
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                treatment slug、offer value、Pixel value 同 success redirect 會由目前 Form、Treatment、Package 及 Brand thank-you base 即時計算。
+              </p>
+              <dl className="mt-4 grid gap-3">
+                <InfoCell label="Treatment slug" value={ops.derivedConfig.treatmentSlug} mono />
+                <InfoCell
+                  label="Event value"
+                  value={
+                    ops.derivedConfig.eventValue === null
+                      ? "未設定"
+                      : `${ops.derivedConfig.currency} ${ops.derivedConfig.eventValue}`
+                  }
+                />
+                <InfoCell
+                  label="Thank-you base"
+                  value={ops.derivedConfig.successRedirectBaseUrl || "未設定"}
+                  mono
+                />
+              </dl>
+              {ops.derivedConfig.staleReasons.length > 0 ? (
+                <ul className="mt-4 grid gap-2 text-sm font-bold text-amber-800">
+                  {ops.derivedConfig.staleReasons.map((reason) => (
+                    <li key={reason}>• {staleReasonLabel(reason)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-4 text-sm font-bold text-emerald-800">
+                  目前 stored config 與即時計算結果一致。
+                </p>
+              )}
+            </section>
+
             <EmbedCodeCard
               code={ops.embedCode}
               title="Ready-to-copy Wix embed"
               description={
                 ops.pixelConfigured
-                  ? "此 snippet 已包含 data-pixel-id、lazy loading 及 LaunchHub attribution capture。"
+                  ? "此 snippet 已包含目前品牌 Pixel、由 Package 計算的 event value、lazy loading 及 LaunchHub attribution capture。"
                   : "此品牌未設定 Pixel，所以 snippet 不會加入 data-pixel-id；Form 仍可安全收 Lead。"
               }
             />
@@ -238,6 +315,7 @@ export default async function FormConfigPage({
               <ul className="mt-3 grid gap-2 text-sm font-semibold leading-6 text-slate-600">
                 <li>確認 Form token 同 Wix page 屬於同一個品牌。</li>
                 <li>確認 allowed domains 包含實際 Wix / campaign domain。</li>
+                <li>確認 Brand thank-you base URL 屬於同一客戶。</li>
                 <li>Pixel missing 不會阻止建立 Form，但不會送出 Pixel beacon。</li>
                 <li>不要在正式廣告使用 debug parameters。</li>
               </ul>
