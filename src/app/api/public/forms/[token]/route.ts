@@ -32,35 +32,50 @@ function buildRuntimeDerivedConfig({
   selectedPackage: Record<string, unknown> | null;
 }) {
   const storedRedirectUrl =
-    typeof form.success_redirect_url === "string" ? form.success_redirect_url : "";
+    typeof form.success_redirect_url === "string"
+      ? form.success_redirect_url
+      : typeof form.successRedirectUrl === "string"
+        ? form.successRedirectUrl
+        : "";
+  const storedRedirectBaseUrl = stripDerivedRedirectParams(storedRedirectUrl);
   const brandBaseUrl =
     typeof brand?.default_thank_you_url === "string"
       ? brand.default_thank_you_url
       : typeof brand?.defaultThankYouUrl === "string"
         ? brand.defaultThankYouUrl
         : "";
-  const successRedirectBaseUrl =
-    brandBaseUrl || stripDerivedRedirectParams(storedRedirectUrl);
+  const successRedirectBaseUrl = storedRedirectBaseUrl || brandBaseUrl;
   const treatmentSlug =
     (typeof treatment?.slug === "string" && treatment.slug.trim()) || "offer";
   const eventValue =
     moneyValue(selectedPackage?.promo_price ?? selectedPackage?.promoPrice) ??
     moneyValue(selectedPackage?.original_price ?? selectedPackage?.originalPrice);
   const currency =
-    (typeof (selectedPackage?.currency) === "string" &&
+    (typeof selectedPackage?.currency === "string" &&
       String(selectedPackage.currency).trim().toUpperCase()) ||
     "HKD";
-  const successRedirectUrl = buildDerivedSuccessRedirectUrl({
-    baseUrl: successRedirectBaseUrl,
-    treatmentSlug,
-    eventValue,
-  });
+  const configuredMode =
+    typeof form.conversion_mode === "string"
+      ? form.conversion_mode
+      : typeof form.conversionMode === "string"
+        ? form.conversionMode
+        : "";
   const conversionMode =
-    form.conversion_mode === "thank_you_redirect" ||
-    Boolean(storedRedirectUrl) ||
-    Boolean(brandBaseUrl)
+    configuredMode === "thank_you_redirect"
       ? "thank_you_redirect"
-      : "form_submit_pixel";
+      : configuredMode === "form_submit_pixel"
+        ? "form_submit_pixel"
+        : storedRedirectUrl
+          ? "thank_you_redirect"
+          : "form_submit_pixel";
+  const successRedirectUrl =
+    conversionMode === "thank_you_redirect"
+      ? buildDerivedSuccessRedirectUrl({
+          baseUrl: successRedirectBaseUrl,
+          treatmentSlug,
+          eventValue,
+        })
+      : "";
 
   return {
     conversion_mode: conversionMode,
