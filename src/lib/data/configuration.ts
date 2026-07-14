@@ -1,11 +1,4 @@
-import {
-  alyssaBranches,
-  alyssaBrand,
-  alyssaDefaultForm,
-  alyssaPackages,
-  alyssaTreatments,
-} from "@/lib/data/alyssaConfig";
-import { alyssaLandingPages } from "@/lib/data/landingPages";
+import type { LandingPageConfig } from "@/lib/data/landingPages";
 import {
   createSupabaseAdminClient,
   hasSupabaseAdminEnv,
@@ -84,7 +77,7 @@ export type ConfigurationData = {
   branches: BranchSetting[];
   forms: FormSetting[];
   templates: LandingPageTemplate[];
-  landingPages: typeof alyssaLandingPages;
+  landingPages: LandingPageConfig[];
 };
 
 export const landingPageTemplates: LandingPageTemplate[] = [
@@ -99,17 +92,17 @@ export const landingPageTemplates: LandingPageTemplate[] = [
   {
     id: "consultation-landing-page",
     name: "Consultation landing page",
-    useCase: "用於免費諮詢、膚況分析或先 WhatsApp 跟進的 campaign。",
+    useCase: "用於免費諮詢、需求分析或先 WhatsApp 跟進的 campaign。",
     recommendedFor: "低門檻查詢、教育型 campaign",
     supportedSections: ["Hero", "Pain points", "Consultation flow", "FAQ", "Embedded form"],
     status: "future",
   },
   {
-    id: "treatment-trial-landing-page",
-    name: "Treatment trial landing page",
-    useCase: "集中介紹單一療程、體驗價同預約流程。",
-    recommendedFor: "療程 trial、A/B offer 測試",
-    supportedSections: ["Hero", "Treatment summary", "Package", "Trust", "FAQ", "Embedded form"],
+    id: "service-trial-landing-page",
+    name: "Service trial landing page",
+    useCase: "集中介紹單一服務、體驗價同預約流程。",
+    recommendedFor: "服務 trial、A/B offer 測試",
+    supportedSections: ["Hero", "Service summary", "Package", "Trust", "FAQ", "Embedded form"],
     status: "future",
   },
   {
@@ -122,71 +115,23 @@ export const landingPageTemplates: LandingPageTemplate[] = [
   },
 ];
 
-function localConfiguration(): ConfigurationData {
+function emptyConfiguration(sourceLabel: string): ConfigurationData {
   return {
-    sourceLabel: "設定參考",
-    brands: [
-      {
-        id: alyssaBrand.id,
-        name: alyssaBrand.name,
-        slug: alyssaBrand.slug,
-        primaryColor: alyssaBrand.primaryColor,
-        secondaryColor: alyssaBrand.secondaryColor,
-        whatsappNumber: alyssaBrand.whatsappNumber,
-        defaultThankYouUrl: alyssaBrand.defaultThankYouUrl,
-      },
-    ],
-    treatments: alyssaTreatments.map((treatment) => ({
-      id: treatment.id,
-      brandId: alyssaBrand.id,
-      name: treatment.name,
-      slug: treatment.slug,
-      description: treatment.description,
-      status: "active",
-    })),
-    packages: alyssaPackages.map((item) => ({
-      id: item.id,
-      treatmentId: item.treatmentId,
-      name: item.name,
-      originalPrice: item.originalPrice,
-      promoPrice: item.promoPrice,
-      currency: item.currency,
-      paymentRequired: item.paymentRequired,
-      status: "active",
-    })),
-    branches: alyssaBranches.map((branch) => ({
-      id: branch.id,
-      brandId: alyssaBrand.id,
-      name: branch.name,
-      slug: branch.slug,
-      address: null,
-      openingHours: null,
-      status: "active",
-    })),
-    forms: [
-      {
-        id: alyssaDefaultForm.id,
-        publicFormToken: alyssaDefaultForm.publicFormToken,
-        brandId: alyssaDefaultForm.brandId,
-        formName: alyssaDefaultForm.formName,
-        status: alyssaDefaultForm.status,
-        allowedDomains: alyssaDefaultForm.allowedDomains,
-        defaultTreatmentId: alyssaDefaultForm.defaultTreatmentId,
-        defaultPackageId: alyssaDefaultForm.defaultPackageId,
-        defaultBranchId: alyssaDefaultForm.defaultBranchId,
-        conversionMode: "form_submit_pixel",
-        successRedirectUrl: null,
-        createdAt: null,
-        updatedAt: null,
-      },
-    ],
+    sourceLabel,
+    brands: [],
+    treatments: [],
+    packages: [],
+    branches: [],
+    forms: [],
     templates: landingPageTemplates,
-    landingPages: alyssaLandingPages,
+    landingPages: [],
   };
 }
 
 function asTextArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function moneyValue(value: number | string | null | undefined, currency = "HKD") {
@@ -221,19 +166,24 @@ export function getBranch(data: ConfigurationData, id: string | null | undefined
   return data.branches.find((item) => item.id === id) ?? null;
 }
 
-export function getLinkedForms(data: ConfigurationData, predicate: (form: FormSetting) => boolean) {
+export function getLinkedForms(
+  data: ConfigurationData,
+  predicate: (form: FormSetting) => boolean
+) {
   return data.forms.filter(predicate);
 }
 
 export function getLinkedLandingPages(
   data: ConfigurationData,
-  predicate: (page: (typeof alyssaLandingPages)[number]) => boolean
+  predicate: (page: LandingPageConfig) => boolean
 ) {
   return data.landingPages.filter(predicate);
 }
 
 export async function getConfigurationData(): Promise<ConfigurationData> {
-  if (!hasSupabaseAdminEnv()) return localConfiguration();
+  if (!hasSupabaseAdminEnv()) {
+    return emptyConfiguration("Growth OS 資料庫未連接");
+  }
 
   try {
     const supabase = createSupabaseAdminClient();
@@ -254,10 +204,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
         .from("branches")
         .select("id,brand_id,name,slug,address,opening_hours,status")
         .order("name", { ascending: true }),
-      supabase
-        .from("forms")
-        .select("*")
-        .order("form_name", { ascending: true }),
+      supabase.from("forms").select("*").order("form_name", { ascending: true }),
     ]);
 
     if (brands.error) throw brands.error;
@@ -267,7 +214,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
     if (forms.error) throw forms.error;
 
     return {
-      sourceLabel: "正式設定",
+      sourceLabel: "Growth OS 正式設定",
       brands: ((brands.data ?? []) as unknown[]).map((item) => {
         const row = item as Record<string, string | null>;
         return {
@@ -285,7 +232,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
         return {
           id: row.id ?? "",
           brandId: row.brand_id ?? "",
-          name: row.name ?? "未命名療程",
+          name: row.name ?? "未命名服務",
           slug: row.slug ?? "",
           description: row.description ?? null,
           status: row.status ?? "active",
@@ -346,10 +293,12 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
         };
       }),
       templates: landingPageTemplates,
-      landingPages: alyssaLandingPages,
+      landingPages: [],
     };
   } catch (error) {
-    console.error("configuration_data_read_failed", error);
-    return localConfiguration();
+    console.error("growthos_configuration_read_failed", {
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    return emptyConfiguration("Growth OS 設定暫時未能讀取");
   }
 }
