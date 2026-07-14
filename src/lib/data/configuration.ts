@@ -61,6 +61,8 @@ export type FormSetting = {
   defaultTreatmentId: string | null;
   defaultPackageId: string | null;
   defaultBranchId: string | null;
+  conversionMode: string | null;
+  successRedirectUrl: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -172,6 +174,8 @@ function localConfiguration(): ConfigurationData {
         defaultTreatmentId: alyssaDefaultForm.defaultTreatmentId,
         defaultPackageId: alyssaDefaultForm.defaultPackageId,
         defaultBranchId: alyssaDefaultForm.defaultBranchId,
+        conversionMode: "form_submit_pixel",
+        successRedirectUrl: null,
         createdAt: null,
         updatedAt: null,
       },
@@ -252,7 +256,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
         .order("name", { ascending: true }),
       supabase
         .from("forms")
-        .select("id,public_form_token,brand_id,form_name,status,allowed_domains,default_treatment_id,default_package_id,default_branch_id,created_at,updated_at")
+        .select("*")
         .order("form_name", { ascending: true }),
     ]);
 
@@ -333,6 +337,10 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
             typeof row.default_package_id === "string" ? row.default_package_id : null,
           defaultBranchId:
             typeof row.default_branch_id === "string" ? row.default_branch_id : null,
+          conversionMode:
+            typeof row.conversion_mode === "string" ? row.conversion_mode : null,
+          successRedirectUrl:
+            typeof row.success_redirect_url === "string" ? row.success_redirect_url : null,
           createdAt: typeof row.created_at === "string" ? row.created_at : null,
           updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
         };
