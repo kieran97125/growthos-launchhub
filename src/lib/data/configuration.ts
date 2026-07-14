@@ -58,6 +58,7 @@ export type FormSetting = {
   defaultBranchId: string | null;
   conversionMode: string | null;
   successRedirectUrl: string | null;
+  isTestForm?: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -226,7 +227,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
         supabase
           .from("lead_forms")
           .select(
-            "id,client_id,brand_id,public_form_token_hash,title,is_active,allowed_domains,created_at,updated_at"
+            "id,client_id,brand_id,public_form_token_hash,title,is_active,is_test_form,allowed_domains,created_at,updated_at"
           )
           .order("title", { ascending: true }),
         supabase
@@ -321,6 +322,7 @@ export async function getConfigurationData(): Promise<ConfigurationData> {
             conversionMode: text(config.conversion_mode) || "form_submit_pixel",
             successRedirectUrl:
               text(config.success_redirect_base_url) || null,
+            isTestForm: Boolean(row.is_test_form),
             createdAt: text(row.created_at) || null,
             updatedAt: text(row.updated_at) || null,
           },
