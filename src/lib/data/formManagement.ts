@@ -9,6 +9,7 @@ import {
   type ConfigurationData,
   type FormSetting,
 } from "@/lib/data/configuration";
+import { deriveFormConfig } from "@/lib/data/derivedFormConfig";
 import {
   createSupabaseAdminClient,
   hasSupabaseAdminEnv,
@@ -128,6 +129,10 @@ function asForm(row: Record<string, unknown>): FormSetting {
       typeof row.default_package_id === "string" ? row.default_package_id : null,
     defaultBranchId:
       typeof row.default_branch_id === "string" ? row.default_branch_id : null,
+    conversionMode:
+      typeof row.conversion_mode === "string" ? row.conversion_mode : null,
+    successRedirectUrl:
+      typeof row.success_redirect_url === "string" ? row.success_redirect_url : null,
     createdAt: typeof row.created_at === "string" ? row.created_at : null,
     updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
   };
@@ -187,6 +192,27 @@ function validateInput(config: ConfigurationData, input: ManagedFormInput) {
   };
 }
 
+function formWithInput(
+  input: ManagedFormInput,
+  existing?: FormSetting
+): FormSetting {
+  return {
+    id: existing?.id || "",
+    publicFormToken: existing?.publicFormToken || "",
+    brandId: input.brandId,
+    formName: input.formName,
+    status: input.status,
+    allowedDomains: input.allowedDomains,
+    defaultTreatmentId: input.defaultTreatmentId,
+    defaultPackageId: input.defaultPackageId,
+    defaultBranchId: input.defaultBranchId,
+    conversionMode: existing?.conversionMode || null,
+    successRedirectUrl: existing?.successRedirectUrl || null,
+    createdAt: existing?.createdAt || null,
+    updatedAt: existing?.updatedAt || null,
+  };
+}
+
 export async function listForms() {
   const config = await getConfigurationData();
   return config.forms;
@@ -218,6 +244,10 @@ export async function createForm(
   if (!validation.ok) return { ok: false, message: validation.message };
   const brand = getBrand(config, validation.input.brandId);
   if (!brand) return { ok: false, message: "請選擇有效品牌。" };
+  const derived = deriveFormConfig(
+    config,
+    formWithInput(validation.input)
+  );
 
   const supabase = createSupabaseAdminClient();
   const token = await createUniqueToken(validation.input.formName, brand.slug);
@@ -232,6 +262,8 @@ export async function createForm(
       default_treatment_id: validation.input.defaultTreatmentId,
       default_package_id: validation.input.defaultPackageId,
       default_branch_id: validation.input.defaultBranchId,
+      conversion_mode: derived.conversionMode,
+      success_redirect_url: derived.successRedirectUrl || null,
     })
     .select("*")
     .single();
@@ -258,6 +290,10 @@ export async function updateForm(
 
   const { form } = await getFormByIdOrSlug(formId);
   if (!form) return { ok: false, message: "找不到表格。" };
+  const derived = deriveFormConfig(
+    config,
+    formWithInput(validation.input, form)
+  );
 
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
@@ -270,6 +306,8 @@ export async function updateForm(
       default_treatment_id: validation.input.defaultTreatmentId,
       default_package_id: validation.input.defaultPackageId,
       default_branch_id: validation.input.defaultBranchId,
+      conversion_mode: derived.conversionMode,
+      success_redirect_url: derived.successRedirectUrl || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", form.id)
@@ -293,6 +331,7 @@ export async function duplicateForm(formId: string): Promise<FormMutationResult>
   if (!form) return { ok: false, message: "找不到表格。" };
   const brand = getBrand(config, form.brandId);
   if (!brand) return { ok: false, message: "請選擇有效品牌。" };
+  const derived = deriveFormConfig(config, form);
 
   const supabase = createSupabaseAdminClient();
   const name = `${form.formName} Copy`;
@@ -308,6 +347,8 @@ export async function duplicateForm(formId: string): Promise<FormMutationResult>
       default_treatment_id: form.defaultTreatmentId,
       default_package_id: form.defaultPackageId,
       default_branch_id: form.defaultBranchId,
+      conversion_mode: derived.conversionMode,
+      success_redirect_url: derived.successRedirectUrl || null,
     })
     .select("*")
     .single();
