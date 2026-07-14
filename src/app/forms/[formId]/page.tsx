@@ -3,39 +3,31 @@ import { notFound } from "next/navigation";
 import { AppNav } from "@/components/alyssa/AppNav";
 import { CopyButton } from "@/components/alyssa/CopyButton";
 import { EmbedCodeCard } from "@/components/alyssa/EmbedCodeCard";
-import { duplicateFormAction, updateFormAction } from "@/app/forms/actions";
+import {
+  duplicateFormAction,
+  rotateFormTokenAction,
+  updateFormAction,
+} from "@/app/forms/actions";
 import {
   META_URL_PARAMETER_GUIDE,
   getFormOperations,
 } from "@/lib/data/brandOperations";
 import {
-  getPackage,
   getTreatment,
   packagePriceLabel,
 } from "@/lib/data/configuration";
 import { getFormByIdOrSlug } from "@/lib/data/formManagement";
+import { getOneTimeFormToken } from "@/lib/security/tokenReveal";
 
 export const dynamic = "force-dynamic";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "未有記錄";
-
   return new Intl.DateTimeFormat("zh-HK", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "Asia/Hong_Kong",
   }).format(new Date(value));
-}
-
-function staleReasonLabel(reason: string) {
-  const labels: Record<string, string> = {
-    stored_redirect_invalid: "已儲存 redirect 格式無效",
-    submitted_flag_stale: "submitted 參數未同步",
-    treatment_slug_stale: "treatment slug 已過期",
-    offer_value_stale: "offer value 已過期",
-    redirect_base_stale: "thank-you base URL 已改變",
-  };
-  return labels[reason] || reason;
 }
 
 export default async function FormConfigPage({
@@ -50,27 +42,23 @@ export default async function FormConfigPage({
   const message =
     typeof query?.form_status === "string" ? query.form_status : null;
   const { form, config } = await getFormByIdOrSlug(formId);
-
   if (!form) notFound();
 
-  const ops = getFormOperations(config, form);
-  const selectedPackage = getPackage(config, form.defaultPackageId);
-  const linkedLandingPages = config.landingPages.filter(
-    (page) => page.formId === form.id || page.formToken === form.publicFormToken
+  const oneTimeToken = await getOneTimeFormToken(form.id);
+  const runtimeForm = oneTimeToken
+    ? { ...form, publicFormToken: oneTimeToken, publicTokenAvailable: true }
+    : form;
+  const ops = getFormOperations(config, runtimeForm);
+  const brandServices = config.treatments.filter(
+    (item) => item.brandId === form.brandId && item.status === "active"
   );
-  const brandTreatments = config.treatments.filter(
-    (item) => item.brandId === form.brandId
+  const serviceIds = new Set(brandServices.map((item) => item.id));
+  const brandPackages = config.packages.filter(
+    (item) => serviceIds.has(item.treatmentId) && item.status === "active"
   );
-  const treatmentIds = new Set(brandTreatments.map((item) => item.id));
-  const brandPackages = config.packages.filter((item) =>
-    treatmentIds.has(item.treatmentId)
+  const brandLocations = config.branches.filter(
+    (item) => item.brandId === form.brandId && item.status === "active"
   );
-  const brandBranches = config.branches.filter((item) => item.brandId === form.brandId);
-  const derivedStatus = ops.derivedConfig.storedRedirectIsStale
-    ? "Needs sync"
-    : ops.derivedConfig.successRedirectUrl
-      ? "Current"
-      : "Not configured";
 
   return (
     <main className="alyssa-shell">
@@ -80,259 +68,201 @@ export default async function FormConfigPage({
           <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
             <div>
               <p className="alyssa-kicker">Form Detail</p>
-              <h1 className="mt-2 text-3xl font-bold text-slate-950">
-                {form.formName}
-              </h1>
+              <h1 className="mt-2 text-3xl font-bold text-slate-950">{form.formName}</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                此 Form 屬於 {ops.brand?.name || "未設定品牌"}。在這裡管理 token、Wix embed snippet、test URL、Meta URL Parameters、allowed domains 及品牌安全檢查。
+                此 Form 屬於 {ops.brand?.name || "未設定品牌"}。管理 Service、Package、Location、allowed domains、conversion mode 同安全 Token 輪替。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link
-                href={`/brands?brand=${ops.brand?.slug || ""}`}
+                href="/forms"
                 className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700"
               >
-                品牌工作區
+                返回 Forms
               </Link>
-              <Link
-                href={`/embed/${form.publicFormToken}`}
-                className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white"
-              >
-                Open Test Form
-              </Link>
+              {ops.tokenAvailable ? (
+                <Link
+                  href={`/embed/${runtimeForm.publicFormToken}`}
+                  className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white"
+                >
+                  Open Test Form
+                </Link>
+              ) : null}
             </div>
           </div>
         </header>
 
-        {message && (
+        {message ? (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
             {message}
           </div>
+        ) : null}
+
+        {oneTimeToken ? (
+          <section className="mt-5 rounded-[28px] border border-emerald-300 bg-emerald-50 p-5">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+              One-time token reveal
+            </p>
+            <h2 className="mt-2 text-xl font-bold text-emerald-950">
+              原始 Token 只會顯示約 10 分鐘
+            </h2>
+            <p className="mt-2 break-all font-mono text-sm font-bold text-emerald-900">
+              {oneTimeToken}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <CopyButton value={oneTimeToken} label="Copy Token" />
+              <CopyButton value={ops.embedCode} label="Copy Wix Embed" />
+              <CopyButton value={ops.previewUrl} label="Copy Test URL" />
+            </div>
+          </section>
+        ) : (
+          <section className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4">
+            <p className="text-sm font-bold text-sky-900">Token 受保護</p>
+            <p className="mt-1 text-sm leading-6 text-sky-800">
+              Database 只儲存 SHA-256 hash，無法還原原始 Token。需要新 Embed 時請執行 Token Rotation；舊 Token會即時失效。
+            </p>
+          </section>
         )}
 
         <section className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
           <StatusCard label="Brand" value={ops.brand?.name || "未設定"} />
-          <StatusCard label="Treatment" value={ops.treatment?.name || "未設定"} />
+          <StatusCard label="Service" value={ops.treatment?.name || "未設定"} />
           <StatusCard label="Package" value={ops.packageLabel} />
+          <StatusCard label="Location" value={ops.branchLabel} />
           <StatusCard
-            label="Pixel"
-            value={ops.pixelConfigured ? ops.pixelId : "Missing"}
-            warning={!ops.pixelConfigured}
-          />
-          <StatusCard
-            label="Derived config"
-            value={derivedStatus}
-            warning={ops.derivedConfig.storedRedirectIsStale}
+            label="Mode"
+            value={form.isTestForm ? "Test Form" : "Production Form"}
+            warning={form.isTestForm !== false}
           />
         </section>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.82fr]">
           <form action={updateFormAction} className="alyssa-premium-card grid min-w-0 gap-5 p-5">
             <input type="hidden" name="formId" value={form.id} />
+            <input type="hidden" name="brandId" value={form.brandId} />
+            <input type="hidden" name="isTestForm" value={form.isTestForm === false ? "false" : "true"} />
 
             <div>
-              <p className="alyssa-kicker">Brand-safe settings</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-950">
-                Form 設定
-              </h2>
+              <p className="alyssa-kicker">Tenant-safe settings</p>
+              <h2 className="mt-2 text-xl font-bold text-slate-950">Form 設定</h2>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <TextField label="Form name" name="formName" value={form.formName} />
+              <ReadonlyField label="Brand" value={ops.brand?.name || "未設定"} />
               <SelectField
-                label="Brand"
-                name="brandId"
-                value={form.brandId}
-                options={config.brands.map((item) => ({
-                  value: item.id,
-                  label: item.name,
-                }))}
-              />
-              <SelectField
-                label="Treatment"
+                label="Service"
                 name="defaultTreatmentId"
-                value={form.defaultTreatmentId ?? ""}
-                options={brandTreatments.map((item) => ({
-                  value: item.id,
-                  label: item.name,
-                }))}
+                value={form.defaultTreatmentId || ""}
+                options={brandServices.map((item) => ({ value: item.id, label: item.name }))}
               />
               <SelectField
-                label="Package / price"
+                label="Package"
                 name="defaultPackageId"
-                value={form.defaultPackageId ?? ""}
+                value={form.defaultPackageId || ""}
                 options={brandPackages.map((item) => ({
                   value: item.id,
-                  label: `${packagePriceLabel(item)} (${getTreatment(config, item.treatmentId)?.name ?? "療程"})`,
+                  label: `${packagePriceLabel(item)} · ${getTreatment(config, item.treatmentId)?.name || "Service"}`,
                 }))}
               />
               <SelectField
-                label="Default branch"
+                label="Location"
                 name="defaultBranchId"
-                value={form.defaultBranchId ?? ""}
-                options={brandBranches.map((item) => ({
-                  value: item.id,
-                  label: item.name,
-                }))}
+                value={form.defaultBranchId || ""}
+                options={brandLocations.map((item) => ({ value: item.id, label: item.name }))}
+              />
+              <SelectField
+                label="Status"
+                name="status"
+                value={form.status === "inactive" ? "inactive" : "active"}
+                options={[
+                  { value: "active", label: "Active" },
+                  { value: "inactive", label: "Inactive" },
+                ]}
+              />
+              <SelectField
+                label="Conversion mode"
+                name="conversionMode"
+                value={form.conversionMode === "thank_you_redirect" ? "thank_you_redirect" : "form_submit_pixel"}
+                options={[
+                  { value: "form_submit_pixel", label: "Form submit pixel" },
+                  { value: "thank_you_redirect", label: "Thank-you redirect" },
+                ]}
+              />
+              <TextField
+                label="Thank-you base URL"
+                name="successRedirectBaseUrl"
+                value={form.successRedirectUrl || ""}
+                required={false}
               />
             </div>
 
             <label className="block min-w-0">
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
-                Allowed domains
-              </span>
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">Allowed domains</span>
               <textarea
                 name="allowedDomains"
                 rows={4}
+                required
                 defaultValue={form.allowedDomains.join("\n")}
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-800 outline-none focus:border-sky-400 focus:bg-white"
               />
-              <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
-                {ops.suggestedDomains.length > 0
-                  ? `建議：${ops.suggestedDomains.join(", ")}。只填網站 origin，不要填完整 tracking URL。`
-                  : "請填客戶實際網站 origin；不要使用其他客戶或平台示例 domain。"}
-              </span>
             </label>
 
             <div className="rounded-2xl bg-slate-50 p-4">
               <dl className="grid gap-3 sm:grid-cols-2">
-                <InfoCell label="Form token" value={form.publicFormToken} mono />
-                <InfoCell label="Status" value={form.status || "active"} />
+                <InfoCell label="Token hash" value={form.publicFormTokenHash || "Missing"} mono />
                 <InfoCell label="Updated" value={formatDate(form.updatedAt)} />
-                <InfoCell label="Branch" value={ops.branchLabel} />
-                <InfoCell label="Test URL" value={ops.previewUrl} mono />
-                <InfoCell label="Conversion mode" value={ops.derivedConfig.conversionMode} />
-                <InfoCell
-                  label="Derived success redirect"
-                  value={ops.derivedConfig.successRedirectUrl || "未設定 thank-you URL"}
-                  mono
-                />
-                <InfoCell
-                  label="Landing Pages"
-                  value={
-                    linkedLandingPages.length > 0
-                      ? linkedLandingPages.map((page) => page.title).join(", ")
-                      : "未連接 Landing Page"
-                  }
-                />
+                <InfoCell label="Conversion mode" value={form.conversionMode || "form_submit_pixel"} />
+                <InfoCell label="Derived redirect" value={ops.derivedConfig.successRedirectUrl || "Not configured"} mono />
               </dl>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="submit"
-                className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.18)] transition hover:-translate-y-1 hover:bg-slate-800"
-              >
-                Save Form
-              </button>
-              <CopyButton value={ops.embedCode} label="Copy Wix Embed" />
-              <CopyButton value={form.publicFormToken} label="Copy Token" />
-              <CopyButton value={ops.previewUrl} label="Copy Test URL" />
-              {ops.derivedConfig.successRedirectUrl ? (
-                <CopyButton
-                  value={ops.derivedConfig.successRedirectUrl}
-                  label="Copy Success Redirect"
-                />
-              ) : null}
-            </div>
+            <button className="w-fit rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-[0_12px_30px_rgba(15,23,42,0.18)]">
+              Save Form
+            </button>
           </form>
 
           <aside className="grid h-fit min-w-0 gap-5">
-            <section
-              className={`alyssa-premium-card min-w-0 border p-5 ${
-                ops.derivedConfig.storedRedirectIsStale
-                  ? "border-amber-300 bg-amber-50/80"
-                  : "border-emerald-200 bg-emerald-50/60"
-              }`}
-            >
-              <p className="alyssa-kicker">Derived configuration</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-950">
-                Redirect / Pixel 一致性
-              </h2>
+            <section className="alyssa-premium-card p-5">
+              <p className="alyssa-kicker">Token rotation</p>
+              <h2 className="mt-2 text-xl font-bold text-slate-950">生成新 Public Token</h2>
               <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
-                treatment slug、offer value、Pixel value 同 success redirect 會由目前 Form、Treatment、Package 及 Brand thank-you base 即時計算。
+                輪替後舊 Token 即時失效。新 Token 只會喺呢部瀏覽器顯示 10 分鐘。
               </p>
-              <dl className="mt-4 grid gap-3">
-                <InfoCell label="Treatment slug" value={ops.derivedConfig.treatmentSlug} mono />
-                <InfoCell
-                  label="Event value"
-                  value={
-                    ops.derivedConfig.eventValue === null
-                      ? "未設定"
-                      : `${ops.derivedConfig.currency} ${ops.derivedConfig.eventValue}`
-                  }
-                />
-                <InfoCell
-                  label="Thank-you base"
-                  value={ops.derivedConfig.successRedirectBaseUrl || "未設定"}
-                  mono
-                />
-              </dl>
-              {ops.derivedConfig.staleReasons.length > 0 ? (
-                <ul className="mt-4 grid gap-2 text-sm font-bold text-amber-800">
-                  {ops.derivedConfig.staleReasons.map((reason) => (
-                    <li key={reason}>• {staleReasonLabel(reason)}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-4 text-sm font-bold text-emerald-800">
-                  目前 stored config 與即時計算結果一致。
-                </p>
-              )}
+              <form action={rotateFormTokenAction} className="mt-4">
+                <input type="hidden" name="formId" value={form.id} />
+                <button className="w-full rounded-full bg-amber-500 px-5 py-3 text-sm font-bold text-white">
+                  Rotate Token
+                </button>
+              </form>
             </section>
 
-            <EmbedCodeCard
-              code={ops.embedCode}
-              title="Ready-to-copy Wix embed"
-              description={
-                ops.pixelConfigured
-                  ? "此 snippet 已包含目前品牌 Pixel、由 Package 計算的 event value、lazy loading 及 LaunchHub attribution capture。"
-                  : "此品牌未設定 Pixel，所以 snippet 不會加入 data-pixel-id；Form 仍可安全收 Lead。"
-              }
-            />
+            {ops.tokenAvailable ? (
+              <EmbedCodeCard
+                code={ops.embedCode}
+                title="Ready-to-copy Wix embed"
+                description="包含 one-time Public Token、lazy loading、tracking capture 同目前 Package event value。"
+              />
+            ) : null}
 
-            <section className="alyssa-premium-card min-w-0 p-5">
+            <section className="alyssa-premium-card p-5">
               <p className="alyssa-kicker">Meta URL Parameters</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-950">
-                Meta Ads 來源參數範本
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                貼到 Meta Ads URL Parameters，用作 UTM、campaign/adset/ad id 及 Source Snapshot。正式廣告不要加入 pixel_debug 或 attribution_debug。
-              </p>
+              <h2 className="mt-2 text-xl font-bold text-slate-950">來源參數範本</h2>
               <div className="mt-4">
                 <CopyButton value={META_URL_PARAMETER_GUIDE} label="Copy URL Parameters" />
               </div>
-              <pre className="mt-4 max-h-44 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-white">
-                {META_URL_PARAMETER_GUIDE}
-              </pre>
             </section>
 
-            <section className="alyssa-premium-card min-w-0 p-5">
-              <p className="alyssa-kicker">Brand safety</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-950">
-                上線前檢查
-              </h2>
-              <ul className="mt-3 grid gap-2 text-sm font-semibold leading-6 text-slate-600">
-                <li>確認 Form token 同 Wix page 屬於同一個品牌。</li>
-                <li>確認 allowed domains 包含實際 Wix / campaign domain。</li>
-                <li>確認 Brand thank-you base URL 屬於同一客戶。</li>
-                <li>Pixel missing 不會阻止建立 Form，但不會送出 Pixel beacon。</li>
-                <li>不要在正式廣告使用 debug parameters。</li>
-              </ul>
-            </section>
-
-            <section className="alyssa-premium-card min-w-0 p-5">
+            <section className="alyssa-premium-card p-5">
               <p className="alyssa-kicker">Duplicate</p>
-              <h2 className="mt-2 text-xl font-bold text-slate-950">
-                複製 Form
-              </h2>
+              <h2 className="mt-2 text-xl font-bold text-slate-950">複製 Form</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                複製設定並生成獨立 Token，唔會共用原 Form credential。
+              </p>
               <form action={duplicateFormAction} className="mt-4">
                 <input type="hidden" name="formId" value={form.id} />
-                <button
-                  type="submit"
-                  className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700"
-                >
-                  Duplicate
+                <button className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700">
+                  Duplicate Form
                 </button>
               </form>
             </section>
@@ -354,14 +284,8 @@ function StatusCard({
 }) {
   return (
     <section className="alyssa-premium-card p-5">
-      <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
-        {label}
-      </p>
-      <p
-        className={`mt-3 break-words text-lg font-bold ${
-          warning ? "text-amber-700" : "text-slate-950"
-        }`}
-      >
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{label}</p>
+      <p className={`mt-3 break-words text-lg font-bold ${warning ? "text-amber-700" : "text-slate-950"}`}>
         {value}
       </p>
     </section>
@@ -372,23 +296,32 @@ function TextField({
   label,
   name,
   value,
+  required = true,
 }: {
   label: string;
   name: string;
   value: string;
+  required?: boolean;
 }) {
   return (
     <label className="block min-w-0">
-      <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
-        {label}
-      </span>
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{label}</span>
       <input
         name={name}
-        required
+        required={required}
         defaultValue={value}
-        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
+        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none focus:border-sky-400 focus:bg-white"
       />
     </label>
+  );
+}
+
+function ReadonlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{label}</p>
+      <p className="mt-2 text-sm font-bold text-slate-700">{value}</p>
+    </div>
   );
 }
 
@@ -405,19 +338,15 @@ function SelectField({
 }) {
   return (
     <label className="block min-w-0">
-      <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
-        {label}
-      </span>
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{label}</span>
       <select
         name={name}
         required
         defaultValue={value}
-        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
+        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none focus:border-sky-400 focus:bg-white"
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
+          <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
     </label>
@@ -435,14 +364,8 @@ function InfoCell({
 }) {
   return (
     <div className="min-w-0 rounded-2xl bg-white/78 p-4">
-      <dt className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">
-        {label}
-      </dt>
-      <dd
-        className={`mt-2 break-words text-sm font-semibold text-slate-700 ${
-          mono ? "font-mono" : ""
-        }`}
-      >
+      <dt className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{label}</dt>
+      <dd className={`mt-2 break-words text-sm font-semibold text-slate-700 ${mono ? "font-mono" : ""}`}>
         {value}
       </dd>
     </div>
