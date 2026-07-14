@@ -102,7 +102,10 @@ function getStaleReasons({
   treatmentSlug: string;
   eventValue: number | null;
 }) {
-  if (!storedUrl || !derivedUrl) return [];
+  if (!derivedUrl) {
+    return storedUrl ? ["stored_redirect_invalid"] : [];
+  }
+  if (!storedUrl) return ["stored_redirect_missing"];
 
   const parsed = parseHttpOrRelativeUrl(storedUrl);
   if (!parsed) return ["stored_redirect_invalid"];
@@ -136,26 +139,31 @@ export function deriveFormConfig(config: ConfigurationData, form: FormSetting): 
   const treatmentSlug = treatment?.slug?.trim() || "offer";
   const currency = selectedPackage?.currency?.trim().toUpperCase() || "HKD";
   const storedRedirectUrl = form.successRedirectUrl?.trim() || "";
+  const storedRedirectBaseUrl = stripDerivedRedirectParams(storedRedirectUrl);
   const brandBaseUrl = brand?.defaultThankYouUrl?.trim() || "";
-  const successRedirectBaseUrl =
-    brandBaseUrl || stripDerivedRedirectParams(storedRedirectUrl);
+  const successRedirectBaseUrl = storedRedirectBaseUrl || brandBaseUrl;
   const successRedirectUrl = buildDerivedSuccessRedirectUrl({
     baseUrl: successRedirectBaseUrl,
     treatmentSlug,
     eventValue,
   });
   const conversionMode: FormConversionMode =
-    form.conversionMode === "thank_you_redirect" ||
-    Boolean(storedRedirectUrl) ||
-    Boolean(brandBaseUrl)
+    form.conversionMode === "thank_you_redirect"
       ? "thank_you_redirect"
-      : "form_submit_pixel";
-  const staleReasons = getStaleReasons({
-    storedUrl: storedRedirectUrl,
-    derivedUrl: successRedirectUrl,
-    treatmentSlug,
-    eventValue,
-  });
+      : form.conversionMode === "form_submit_pixel"
+        ? "form_submit_pixel"
+        : storedRedirectUrl
+          ? "thank_you_redirect"
+          : "form_submit_pixel";
+  const staleReasons =
+    conversionMode === "thank_you_redirect"
+      ? getStaleReasons({
+          storedUrl: storedRedirectUrl,
+          derivedUrl: successRedirectUrl,
+          treatmentSlug,
+          eventValue,
+        })
+      : [];
 
   return {
     conversionMode,
