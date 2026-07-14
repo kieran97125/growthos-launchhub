@@ -7,6 +7,9 @@
 -- This script changes only forms using thank_you_redirect whose stored
 -- treatment or value query parameter no longer matches the selected
 -- treatment/package configuration.
+--
+-- The existing redirect host/path is preserved where present. The brand
+-- default thank-you URL is only used when a redirect URL is missing.
 
 begin;
 
@@ -16,7 +19,10 @@ with form_config as (
     f.public_form_token,
     f.form_name,
     b.name as brand_name,
-    b.default_thank_you_url,
+    coalesce(
+      nullif(regexp_replace(f.success_redirect_url, '[?].*$', ''), ''),
+      nullif(regexp_replace(b.default_thank_you_url, '[?].*$', ''), '')
+    ) as redirect_base_url,
     t.slug as treatment_slug,
     coalesce(p.promo_price, p.original_price) as expected_value,
     f.success_redirect_url,
@@ -37,12 +43,12 @@ preview as (
     success_redirect_url as old_success_redirect_url,
     format(
       '%s?submitted=1&treatment=%s&value=%s',
-      regexp_replace(default_thank_you_url, '[?].*$', ''),
+      redirect_base_url,
       treatment_slug,
       round(expected_value)::text
     ) as new_success_redirect_url
   from form_config
-  where default_thank_you_url is not null
+  where redirect_base_url is not null
     and treatment_slug is not null
     and expected_value is not null
     and (
@@ -60,7 +66,10 @@ order by brand_name, form_name;
 with form_config as (
   select
     f.id,
-    b.default_thank_you_url,
+    coalesce(
+      nullif(regexp_replace(f.success_redirect_url, '[?].*$', ''), ''),
+      nullif(regexp_replace(b.default_thank_you_url, '[?].*$', ''), '')
+    ) as redirect_base_url,
     t.slug as treatment_slug,
     coalesce(p.promo_price, p.original_price) as expected_value,
     f.success_redirect_url,
@@ -77,12 +86,12 @@ repair as (
     id,
     format(
       '%s?submitted=1&treatment=%s&value=%s',
-      regexp_replace(default_thank_you_url, '[?].*$', ''),
+      redirect_base_url,
       treatment_slug,
       round(expected_value)::text
     ) as new_success_redirect_url
   from form_config
-  where default_thank_you_url is not null
+  where redirect_base_url is not null
     and treatment_slug is not null
     and expected_value is not null
     and (
