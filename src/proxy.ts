@@ -92,7 +92,7 @@ function isAdminBackendPath(pathname: string) {
 
 function redirectToGrowthOsSso(request: NextRequest) {
   const growthOsOrigin =
-    cleanBaseUrl(process.env.GROWTH_OS_PLATFORM_URL) ||
+    originFromBaseUrl(process.env.GROWTH_OS_PLATFORM_URL) ||
     "https://leadhub-source-os.vercel.app";
   const bridge = new URL("/launchhub", growthOsOrigin);
   bridge.searchParams.set(
