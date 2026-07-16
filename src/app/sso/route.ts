@@ -6,6 +6,8 @@ import {
 } from "@/lib/security/internalAccess";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
+
 function redirectUrl(request: NextRequest, pathname: string, reason?: string) {
   const url = new URL(pathname, request.url);
   if (reason) url.searchParams.set("reason", reason);
@@ -34,8 +36,11 @@ export async function GET(request: NextRequest) {
   }
 
   const target = request.nextUrl.searchParams.get("next") || "/";
-  const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
-  const response = redirectUrl(request, safeTarget);
+  const safeTarget =
+    target.startsWith("/") && !target.startsWith("//") ? target : "/";
+  const targetUrl = new URL(safeTarget, request.url);
+  targetUrl.searchParams.set(SSO_RECOVERY_MARKER, "1");
+  const response = NextResponse.redirect(targetUrl);
 
   response.cookies.set(adminSessionCookieName, session, {
     httpOnly: true,
