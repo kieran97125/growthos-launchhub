@@ -30,7 +30,7 @@ type AdminSessionPayload = {
 
 export const adminSessionCookieName = "launchhub_admin_session";
 export const legacyInternalSessionCookieName = "launchhub_internal_session";
-export const adminSessionMaxAgeSeconds = 60 * 60 * 12;
+export const adminSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 
 function isProductionRuntime() {
   return process.env.NODE_ENV === "production";
