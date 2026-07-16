@@ -14,3 +14,7 @@ After the legacy Alyssa fallback was removed, a valid zero-row Growth OS result 
 - A database or environment failure must show a distinct retryable error state.
 - The empty state must provide the first-Campaign and Brand Library actions.
 - No Alyssa customer or demo Landing Page data is copied into Growth OS.
+
+## Release verification
+
+The production route must return a visible connected empty state for a valid zero-row result.
