@@ -70,7 +70,7 @@ function growthOsOrigin() {
 
 function redirectToGrowthOsBridge(request: NextRequest) {
   const nextPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
-  const bridgeUrl = new URL("/launchhub-bridge", growthOsOrigin());
+  const bridgeUrl = new URL("/launchhub", growthOsOrigin());
   bridgeUrl.searchParams.set("next", nextPath);
   return NextResponse.redirect(bridgeUrl);
 }
