@@ -6,6 +6,8 @@ import {
 } from "@/lib/security/internalAccess";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
+
 function redirectUrl(request: NextRequest, pathname: string, reason?: string) {
   const url = new URL(pathname, request.url);
   if (reason) url.searchParams.set("reason", reason);
@@ -15,7 +17,7 @@ function redirectUrl(request: NextRequest, pathname: string, reason?: string) {
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code")?.trim() || "";
   if (!/^[0-9a-f]{64}$/.test(code)) {
-    return redirectUrl(request, "/login", "invalid_sso_code");
+    return redirectUrl(request, "/login?manual=1", "invalid_sso_code");
   }
 
   const supabase = createSupabaseAdminClient();
@@ -25,17 +27,19 @@ export async function GET(request: NextRequest) {
 
   const consumed = Array.isArray(data) ? data[0] : data;
   if (error || !consumed?.user_id) {
-    return redirectUrl(request, "/login", "expired_or_used_sso_code");
+    return redirectUrl(request, "/login?manual=1", "expired_or_used_sso_code");
   }
 
   const session = await createSignedAdminSession();
   if (!session) {
-    return redirectUrl(request, "/login", "session_configuration_missing");
+    return redirectUrl(request, "/login?manual=1", "session_configuration_missing");
   }
 
   const target = request.nextUrl.searchParams.get("next") || "/";
   const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
-  const response = redirectUrl(request, safeTarget);
+  const targetUrl = new URL(safeTarget, request.url);
+  targetUrl.searchParams.set(SSO_RECOVERY_MARKER, "1");
+  const response = NextResponse.redirect(targetUrl);
 
   response.cookies.set(adminSessionCookieName, session, {
     httpOnly: true,
