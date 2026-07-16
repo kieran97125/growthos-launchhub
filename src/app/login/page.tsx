@@ -21,6 +21,13 @@ function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function growthOsOrigin() {
+  return (
+    process.env.NEXT_PUBLIC_GROWTH_OS_APP_URL ||
+    "https://leadhub-source-os.vercel.app"
+  );
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -39,11 +46,7 @@ export default async function LoginPage({
   const configurationFailure = reason === "session_configuration_missing";
 
   if (!manual && !configurationFailure) {
-    const bridge = new URL(
-      "/launchhub-bridge",
-      process.env.NEXT_PUBLIC_GROWTH_OS_APP_URL ||
-        "https://leadhub-source-os.vercel.app"
-    );
+    const bridge = new URL("/launchhub", growthOsOrigin());
     bridge.searchParams.set("next", next);
     redirect(bridge.toString());
   }
@@ -108,9 +111,7 @@ export default async function LoginPage({
           </form>
 
           <Link
-            href={`https://leadhub-source-os.vercel.app/launchhub-bridge?next=${encodeURIComponent(
-              next
-            )}`}
+            href={`${growthOsOrigin()}/launchhub?next=${encodeURIComponent(next)}`}
             className="mt-4 block text-center text-sm font-bold text-sky-700"
           >
             返回 Growth OS 單一登入
