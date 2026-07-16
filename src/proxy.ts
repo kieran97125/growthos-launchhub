@@ -6,6 +6,8 @@ import {
   verifySignedAdminSession,
 } from "@/lib/security/internalAccess";
 
+const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
+
 function cleanBaseUrl(value: string | undefined) {
   const cleaned = value?.trim().replace(/\/+$/, "");
   return cleaned || null;
@@ -14,6 +16,7 @@ function cleanBaseUrl(value: string | undefined) {
 function originFromBaseUrl(value: string | undefined) {
   const configured = cleanBaseUrl(value);
   if (!configured) return null;
+
   try {
     return new URL(configured).origin;
   } catch {
@@ -22,7 +25,10 @@ function originFromBaseUrl(value: string | undefined) {
 }
 
 function getRequestHost(request: NextRequest) {
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host;
+  const host =
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    request.nextUrl.host;
   return host.split(",")[0]?.trim().toLowerCase() || request.nextUrl.host;
 }
 
@@ -37,11 +43,20 @@ function getRequestOrigin(request: NextRequest) {
 }
 
 function getConfiguredAdminOrigin(request: NextRequest) {
-  const configuredAdminOrigin = originFromBaseUrl(process.env.NEXT_PUBLIC_ADMIN_BASE_URL);
+  const configuredAdminOrigin = originFromBaseUrl(
+    process.env.NEXT_PUBLIC_ADMIN_BASE_URL
+  );
   if (configuredAdminOrigin) return configuredAdminOrigin;
-  if (getRequestHostname(request) === "go.beautytrialhk.com") return "https://app.beautytrialhk.com";
+
+  if (getRequestHostname(request) === "go.beautytrialhk.com") {
+    return "https://app.beautytrialhk.com";
+  }
+
   const appOrigin = originFromBaseUrl(process.env.NEXT_PUBLIC_APP_URL);
-  if (appOrigin && new URL(appOrigin).hostname !== "go.beautytrialhk.com") return appOrigin;
+  if (appOrigin && new URL(appOrigin).hostname !== "go.beautytrialhk.com") {
+    return appOrigin;
+  }
+
   return null;
 }
 
@@ -51,14 +66,24 @@ function getConfiguredPublicOrigin() {
 
 function shouldUseAdminOrigin(request: NextRequest) {
   const adminOrigin = getConfiguredAdminOrigin(request);
-  if (!adminOrigin || getRequestOrigin(request) === adminOrigin) return null;
+  if (!adminOrigin) return null;
+  if (getRequestOrigin(request) === adminOrigin) return null;
+
   const publicOrigin = getConfiguredPublicOrigin();
-  const isKnownPublicHost = getRequestHostname(request) === "go.beautytrialhk.com" || (publicOrigin !== null && getRequestOrigin(request) === publicOrigin);
+  const isKnownPublicHost =
+    getRequestHostname(request) === "go.beautytrialhk.com" ||
+    (publicOrigin !== null && getRequestOrigin(request) === publicOrigin);
+
   return isKnownPublicHost ? adminOrigin : null;
 }
 
 function redirectToAdminOrigin(request: NextRequest, adminOrigin: string) {
-  return NextResponse.redirect(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, adminOrigin));
+  const targetUrl = new URL(
+    `${request.nextUrl.pathname}${request.nextUrl.search}`,
+    adminOrigin
+  );
+
+  return NextResponse.redirect(targetUrl);
 }
 
 function isAdminBackendPath(pathname: string) {
@@ -66,26 +91,65 @@ function isAdminBackendPath(pathname: string) {
 }
 
 function redirectToGrowthOsSso(request: NextRequest) {
-  const growthOsOrigin = cleanBaseUrl(process.env.GROWTH_OS_PLATFORM_URL) || "https://leadhub-source-os.vercel.app";
+  const growthOsOrigin =
+    originFromBaseUrl(process.env.GROWTH_OS_PLATFORM_URL) ||
+    "https://leadhub-source-os.vercel.app";
   const bridge = new URL("/launchhub", growthOsOrigin);
-  bridge.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+  bridge.searchParams.set(
+    "next",
+    `${request.nextUrl.pathname}${request.nextUrl.search}`
+  );
   return NextResponse.redirect(bridge);
+}
+
+function cleanRecoveryMarker(request: NextRequest) {
+  const cleanUrl = request.nextUrl.clone();
+  cleanUrl.searchParams.delete(SSO_RECOVERY_MARKER);
+  return cleanUrl;
+}
+
+function redirectToFallbackLogin(request: NextRequest) {
+  const loginUrl = request.nextUrl.clone();
+  const nextUrl = cleanRecoveryMarker(request);
+  loginUrl.pathname = "/login";
+  loginUrl.search = "";
+  loginUrl.searchParams.set("next", `${nextUrl.pathname}${nextUrl.search}`);
+  loginUrl.searchParams.set("error", "sso_session_unavailable");
+  return NextResponse.redirect(loginUrl);
 }
 
 export async function proxy(request: NextRequest) {
   if (isAdminBackendPath(request.nextUrl.pathname)) {
     const adminOrigin = shouldUseAdminOrigin(request);
-    if (adminOrigin) return redirectToAdminOrigin(request, adminOrigin);
+    if (adminOrigin) {
+      return redirectToAdminOrigin(request, adminOrigin);
+    }
   }
 
-  if (isAdminPasswordGateEnabled() && isInternalRoute(request.nextUrl.pathname)) {
-    const session = await verifySignedAdminSession(request.cookies.get(adminSessionCookieName)?.value);
-    if (!session.ok) return redirectToGrowthOsSso(request);
+  if (
+    isAdminPasswordGateEnabled() &&
+    isInternalRoute(request.nextUrl.pathname)
+  ) {
+    const session = await verifySignedAdminSession(
+      request.cookies.get(adminSessionCookieName)?.value
+    );
+
+    if (!session.ok) {
+      return request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)
+        ? redirectToFallbackLogin(request)
+        : redirectToGrowthOsSso(request);
+    }
+
+    if (request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)) {
+      return NextResponse.redirect(cleanRecoveryMarker(request));
+    }
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\..*).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\..*).*)",
+  ],
 };
