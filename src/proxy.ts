@@ -8,6 +8,16 @@ import {
 
 const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
 
+function privateRedirect(url: URL) {
+  const response = NextResponse.redirect(url);
+  response.headers.set(
+    "Cache-Control",
+    "private, no-store, no-cache, max-age=0, must-revalidate"
+  );
+  response.headers.set("Vary", "Cookie");
+  return response;
+}
+
 function cleanBaseUrl(value: string | undefined) {
   const cleaned = value?.trim().replace(/\/+$/, "");
   return cleaned || null;
@@ -50,7 +60,7 @@ function shouldUseAdminOrigin(request: NextRequest) {
 }
 
 function redirectToAdminOrigin(request: NextRequest, adminOrigin: string) {
-  return NextResponse.redirect(
+  return privateRedirect(
     new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, adminOrigin)
   );
 }
@@ -66,7 +76,7 @@ function redirectToGrowthOsSso(request: NextRequest) {
   const bridge = new URL("/launchhub", growthOsOrigin);
   const cleanUrl = cleanRecoveryMarker(request);
   bridge.searchParams.set("next", `${cleanUrl.pathname}${cleanUrl.search}`);
-  return NextResponse.redirect(bridge);
+  return privateRedirect(bridge);
 }
 
 function cleanRecoveryMarker(request: NextRequest) {
@@ -82,7 +92,7 @@ function redirectToFallbackLogin(request: NextRequest) {
   loginUrl.search = "";
   loginUrl.searchParams.set("next", `${nextUrl.pathname}${nextUrl.search}`);
   loginUrl.searchParams.set("error", "sso_session_unavailable");
-  return NextResponse.redirect(loginUrl);
+  return privateRedirect(loginUrl);
 }
 
 export async function proxy(request: NextRequest) {
@@ -106,7 +116,7 @@ export async function proxy(request: NextRequest) {
     }
 
     if (request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)) {
-      return NextResponse.redirect(cleanRecoveryMarker(request));
+      return privateRedirect(cleanRecoveryMarker(request));
     }
   }
 

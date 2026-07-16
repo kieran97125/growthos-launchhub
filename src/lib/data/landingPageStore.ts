@@ -1,5 +1,4 @@
 import { randomBytes } from "crypto";
-import { alyssaDefaultForm } from "@/lib/data/alyssaConfig";
 import {
   alyssaLandingPages,
   defaultLandingPageContent,
@@ -25,6 +24,7 @@ import {
 
 type LandingPageRow = {
   id: string;
+  client_id: string;
   slug: string;
   title: string;
   brand_id: string | null;
@@ -969,10 +969,8 @@ async function validatePublishReadinessWithResolvedForm(
   const supabase = createSupabaseAdminClient();
   const formResult = row.form_id
     ? await supabase
-        .from("forms")
-        .select(
-          "id,brand_id,form_name,public_form_token,default_treatment_id,default_package_id,default_branch_id"
-        )
+        .from("lead_forms")
+        .select("id,client_id,brand_id,title,form_key")
         .eq("id", row.form_id)
         .maybeSingle()
     : { data: null, error: null };
@@ -987,19 +985,10 @@ async function validatePublishReadinessWithResolvedForm(
   const form = formResult.data as Record<string, unknown> | null;
   if (row.form_id && !form) missing.push("表格資料未找到");
 
-  const resolvedBrandId =
-    row.brand_id ?? (typeof form?.brand_id === "string" ? form.brand_id : null);
-  const resolvedTreatmentId =
-    row.treatment_id ??
-    (typeof form?.default_treatment_id === "string"
-      ? form.default_treatment_id
-      : null);
-  const resolvedPackageId =
-    row.package_id ??
-    (typeof form?.default_package_id === "string" ? form.default_package_id : null);
-  const resolvedBranchId =
-    row.branch_id ??
-    (typeof form?.default_branch_id === "string" ? form.default_branch_id : null);
+  const resolvedBrandId = row.brand_id;
+  const resolvedTreatmentId = row.treatment_id;
+  const resolvedPackageId = row.package_id;
+  const resolvedBranchId = row.branch_id;
 
   if (!resolvedBrandId) missing.push("品牌未設定");
   if (!resolvedTreatmentId) missing.push("療程未設定");
@@ -1011,27 +1000,27 @@ async function validatePublishReadinessWithResolvedForm(
       resolvedBrandId
         ? supabase
             .from("brands")
-            .select("id,name,slug")
+            .select("id,client_id,brand_name,brand_code")
             .eq("id", resolvedBrandId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       resolvedTreatmentId
         ? supabase
-            .from("treatments")
+            .from("launchhub_services")
             .select("id,brand_id")
             .eq("id", resolvedTreatmentId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       resolvedPackageId
         ? supabase
-            .from("packages")
-            .select("id,treatment_id")
+            .from("launchhub_packages")
+            .select("id,brand_id,service_id")
             .eq("id", resolvedPackageId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       resolvedBranchId
         ? supabase
-            .from("branches")
+            .from("launchhub_locations")
             .select("id,brand_id")
             .eq("id", resolvedBranchId)
             .maybeSingle()
@@ -1065,8 +1054,8 @@ async function validatePublishReadinessWithResolvedForm(
 
   if (
     resolvedTreatmentId &&
-    packageRow?.treatment_id &&
-    packageRow.treatment_id !== resolvedTreatmentId
+    packageRow?.service_id &&
+    packageRow.service_id !== resolvedTreatmentId
   ) {
     missing.push("套餐與療程不一致");
   }
@@ -1079,19 +1068,12 @@ async function validatePublishReadinessWithResolvedForm(
     missing.push("表格品牌與頁面品牌不一致");
   }
 
-  const brandName = String(brand?.name ?? "");
-  const brandSlug = String(brand?.slug ?? "");
-  const formName = String(form?.form_name ?? "");
-  const formToken = String(form?.public_form_token ?? "");
-  const isIneffablePage =
-    /ineffable/i.test(brandName) || /ineffable/i.test(brandSlug);
-  const isAlyssaMainForm =
-    /alyssa/i.test(formName) || formToken === alyssaDefaultForm.publicFormToken;
+  if (row.client_id && brand?.client_id && brand.client_id !== row.client_id) {
+    missing.push("品牌與 Landing Page Client 不一致");
+  }
 
-  if (isIneffablePage && isAlyssaMainForm) {
-    missing.push(
-      "這個公開頁仍然連接 Alyssa 表格，請先改用 Ineffable Beauty 表格。"
-    );
+  if (row.client_id && form?.client_id && form.client_id !== row.client_id) {
+    missing.push("表格與 Landing Page Client 不一致");
   }
 
   return Array.from(new Set(missing));
@@ -1425,9 +1407,9 @@ export async function getLandingPageList() {
         code: error.code,
         message: error.message,
       });
-    } else if (data && data.length > 0) {
+    } else {
       const pages = await Promise.all(
-        (data as LandingPageRow[]).map(async (row) => {
+        ((data ?? []) as LandingPageRow[]).map(async (row) => {
           const version =
             (await getLatestVersion(row.id, "draft")) ??
             (await getPublishedVersionForRow(row)) ??
@@ -1444,14 +1426,7 @@ export async function getLandingPageList() {
     }
   }
 
-  return {
-    pages: alyssaLandingPages.map((page) => ({
-      ...page,
-      builderSource: "local_config" as const,
-    })),
-    source: "local_config" as const,
-    canPersist: false,
-  };
+  return { pages: [], source: "local_config" as const, canPersist: false };
 }
 
 export async function createLandingPageDraft(input: CreateLandingPageDraftInput) {
@@ -1467,11 +1442,11 @@ export async function createLandingPageDraft(input: CreateLandingPageDraftInput)
   const supabase = createSupabaseAdminClient();
   const { data: brand, error: brandError } = await supabase
     .from("brands")
-    .select("slug")
+    .select("client_id,brand_code")
     .eq("id", input.brandId)
-    .maybeSingle<{ slug: string | null }>();
+    .maybeSingle<{ client_id: string; brand_code: string }>();
 
-  if (brandError || !brand?.slug) {
+  if (brandError || !brand?.client_id || !brand?.brand_code) {
     console.warn("landing_page_brand_slug_lookup_failed", brandError);
     return {
       ok: false,
@@ -1481,7 +1456,7 @@ export async function createLandingPageDraft(input: CreateLandingPageDraftInput)
     };
   }
 
-  const slug = await createUniqueLandingPageSlug(input.title, brand.slug);
+  const slug = await createUniqueLandingPageSlug(input.title, brand.brand_code);
   const content: LandingPageContent = {
     templateName: "offer-landing-page",
     testingStatus: "ready_for_testing",
@@ -1519,6 +1494,7 @@ export async function createLandingPageDraft(input: CreateLandingPageDraftInput)
     .insert({
       slug,
       title: input.title,
+      client_id: brand.client_id,
       brand_id: input.brandId,
       treatment_id: input.treatmentId,
       package_id: input.packageId,
