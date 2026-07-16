@@ -51,6 +51,8 @@ export default async function LoginPage({
             <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {error === "invalid_password"
                 ? "Password 不正確，請再試一次。"
+                : error === "sso_session_unavailable"
+                  ? "瀏覽器未能保存 Growth OS 登入狀態。你可以用後備 Admin Password 登入，或檢查瀏覽器 Cookie 設定後再試。"
                 : "暫時未能開啟 admin 工作台，請稍後再試。"}
             </p>
           )}
