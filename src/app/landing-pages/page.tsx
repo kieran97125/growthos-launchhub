@@ -37,10 +37,11 @@ function findConnectedForm(page: LandingPageConfig, forms: FormSetting[]) {
 }
 
 export default async function LandingPagesPage() {
-  const [{ pages }, config] = await Promise.all([
+  const [landingPageResult, config] = await Promise.all([
     getLandingPageList(),
     getConfigurationData(),
   ]);
+  const { pages, errorMessage, canPersist } = landingPageResult;
 
   return (
     <main className="alyssa-shell">
@@ -64,6 +65,58 @@ export default async function LandingPagesPage() {
           </Link>
         </header>
 
+        {errorMessage ? (
+          <section className="mt-6 rounded-[28px] border border-red-200 bg-white/90 p-8 shadow-[0_18px_50px_rgba(127,29,29,0.08)]">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-red-600">
+              Unable to load
+            </p>
+            <h2 className="mt-3 text-2xl font-bold text-[#321428]">
+              未能讀取 Landing Pages
+            </h2>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[#6d4a5c]">
+              {errorMessage}
+            </p>
+            <a
+              href="/landing-pages"
+              className="mt-5 inline-flex rounded-full bg-[#5a2348] px-5 py-3 text-sm font-bold text-white"
+            >
+              重新載入
+            </a>
+          </section>
+        ) : null}
+
+        {!errorMessage && pages.length === 0 ? (
+          <section className="mt-6 rounded-[28px] border border-[#ead9cf] bg-white/88 p-8 text-center shadow-[0_18px_50px_rgba(90,35,72,0.08)]">
+            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#fff0ea] text-lg font-black text-[#e46f64]">
+              LP
+            </div>
+            <p className="mt-5 text-xs font-black uppercase tracking-[0.16em] text-emerald-700">
+              {canPersist ? "Growth OS database connected" : "Database unavailable"}
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-[#321428]">
+              列表已載入，暫時未有 Landing Page
+            </h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-6 text-[#6d4a5c]">
+              建立第一個 Campaign 後，Landing Page 草稿、狀態、公開網址及編輯入口會喺呢度顯示。
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <Link
+                href="/campaigns/new"
+                className="rounded-full bg-[#e46f64] px-5 py-3 text-sm font-bold text-white shadow-[0_12px_30px_rgba(228,111,100,0.22)]"
+              >
+                建立第一個 Campaign
+              </Link>
+              <Link
+                href="/settings#brand-library"
+                className="rounded-full border border-[#d9b66f] bg-white px-5 py-3 text-sm font-bold text-[#5a2348]"
+              >
+                前往品牌資料庫
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
+        {pages.length > 0 ? (
         <section className="mt-6 grid gap-5">
           {pages.map((page, index) => {
             const context = getLandingPageContext(page);
@@ -137,6 +190,7 @@ export default async function LandingPagesPage() {
             );
           })}
         </section>
+        ) : null}
       </div>
     </main>
   );

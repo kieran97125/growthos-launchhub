@@ -1407,6 +1407,12 @@ export async function getLandingPageList() {
         code: error.code,
         message: error.message,
       });
+      return {
+        pages: [],
+        source: "supabase" as const,
+        canPersist: false,
+        errorMessage: `Landing Page 資料庫讀取失敗（${error.code || "unknown"}）。`,
+      };
     } else {
       const pages = await Promise.all(
         ((data ?? []) as LandingPageRow[]).map(async (row) => {
@@ -1422,11 +1428,17 @@ export async function getLandingPageList() {
         pages,
         source: "supabase" as const,
         canPersist: true,
+        errorMessage: null,
       };
     }
   }
 
-  return { pages: [], source: "local_config" as const, canPersist: false };
+  return {
+    pages: [],
+    source: "local_config" as const,
+    canPersist: false,
+    errorMessage: "正式資料庫環境未完成設定，暫時未能讀取 Landing Pages。",
+  };
 }
 
 export async function createLandingPageDraft(input: CreateLandingPageDraftInput) {
