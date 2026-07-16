@@ -85,6 +85,7 @@ export default async function LandingPagesPage() {
           </section>
         ) : null}
 
+        {/* A successful zero-row query is a loaded empty list, not a blank screen. */}
         {!errorMessage && pages.length === 0 ? (
           <section className="mt-6 rounded-[28px] border border-[#ead9cf] bg-white/88 p-8 text-center shadow-[0_18px_50px_rgba(90,35,72,0.08)]">
             <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#fff0ea] text-lg font-black text-[#e46f64]">
