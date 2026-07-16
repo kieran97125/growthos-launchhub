@@ -11,7 +11,13 @@ const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
 function redirectUrl(request: NextRequest, pathname: string, reason?: string) {
   const url = new URL(pathname, request.url);
   if (reason) url.searchParams.set("reason", reason);
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.headers.set(
+    "Cache-Control",
+    "private, no-store, no-cache, max-age=0, must-revalidate"
+  );
+  response.headers.set("Vary", "Cookie");
+  return response;
 }
 
 export async function GET(request: NextRequest) {
@@ -41,6 +47,11 @@ export async function GET(request: NextRequest) {
   const targetUrl = new URL(safeTarget, request.url);
   targetUrl.searchParams.set(SSO_RECOVERY_MARKER, "1");
   const response = NextResponse.redirect(targetUrl);
+  response.headers.set(
+    "Cache-Control",
+    "private, no-store, no-cache, max-age=0, must-revalidate"
+  );
+  response.headers.set("Vary", "Cookie");
 
   response.cookies.set(adminSessionCookieName, session, {
     httpOnly: true,
