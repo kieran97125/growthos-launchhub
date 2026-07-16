@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setAdminSessionCookie } from "@/lib/security/internalAccessServer";
+import {
+  adminSessionCookieName,
+  adminSessionMaxAgeSeconds,
+  createSignedAdminSession,
+} from "@/lib/security/internalAccess";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectUrl(request: NextRequest, pathname: string, reason?: string) {
@@ -24,12 +28,22 @@ export async function GET(request: NextRequest) {
     return redirectUrl(request, "/login", "expired_or_used_sso_code");
   }
 
-  const sessionSet = await setAdminSessionCookie();
-  if (!sessionSet) {
+  const session = await createSignedAdminSession();
+  if (!session) {
     return redirectUrl(request, "/login", "session_configuration_missing");
   }
 
   const target = request.nextUrl.searchParams.get("next") || "/";
   const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
-  return redirectUrl(request, safeTarget);
+  const response = redirectUrl(request, safeTarget);
+
+  response.cookies.set(adminSessionCookieName, session, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: adminSessionMaxAgeSeconds,
+  });
+
+  return response;
 }
