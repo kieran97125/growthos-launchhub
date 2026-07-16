@@ -17,6 +17,7 @@ export function SettingsNav() {
         <Link
           key={item.href}
           href={item.href}
+          prefetch={false}
           className="min-w-0 rounded-full border border-slate-200 bg-white/78 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50"
         >
           {item.label}
