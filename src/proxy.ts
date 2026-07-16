@@ -6,6 +6,8 @@ import {
   verifySignedAdminSession,
 } from "@/lib/security/internalAccess";
 
+const SSO_RECOVERY_MARKER = "launchhub_sso_recovered";
+
 function cleanBaseUrl(value: string | undefined) {
   const cleaned = value?.trim().replace(/\/+$/, "");
   return cleaned || null;
@@ -68,11 +70,28 @@ function growthOsOrigin() {
   );
 }
 
+function cleanRecoveryMarker(request: NextRequest) {
+  const cleanUrl = request.nextUrl.clone();
+  cleanUrl.searchParams.delete(SSO_RECOVERY_MARKER);
+  return cleanUrl;
+}
+
 function redirectToGrowthOsBridge(request: NextRequest) {
-  const nextPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+  const cleanUrl = cleanRecoveryMarker(request);
   const bridgeUrl = new URL("/launchhub", growthOsOrigin());
-  bridgeUrl.searchParams.set("next", nextPath);
+  bridgeUrl.searchParams.set("next", `${cleanUrl.pathname}${cleanUrl.search}`);
   return NextResponse.redirect(bridgeUrl);
+}
+
+function redirectToFallbackLogin(request: NextRequest) {
+  const cleanUrl = cleanRecoveryMarker(request);
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/login";
+  loginUrl.search = "";
+  loginUrl.searchParams.set("manual", "1");
+  loginUrl.searchParams.set("next", `${cleanUrl.pathname}${cleanUrl.search}`);
+  loginUrl.searchParams.set("error", "sso_session_unavailable");
+  return NextResponse.redirect(loginUrl);
 }
 
 export async function proxy(request: NextRequest) {
@@ -90,7 +109,13 @@ export async function proxy(request: NextRequest) {
     );
 
     if (!session.ok) {
-      return redirectToGrowthOsBridge(request);
+      return request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)
+        ? redirectToFallbackLogin(request)
+        : redirectToGrowthOsBridge(request);
+    }
+
+    if (request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)) {
+      return NextResponse.redirect(cleanRecoveryMarker(request));
     }
   }
 
