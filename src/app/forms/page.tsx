@@ -87,13 +87,6 @@ export default async function FormsPage({
           </div>
         </header>
 
-        <section className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-          <p className="text-sm font-bold text-emerald-900">Growth OS Native Admin 已啟用</p>
-          <p className="mt-1 text-sm leading-6 text-emerald-800">
-            建立、修改、複製及 Token 輪替均使用 tenant-scoped RPC；唔會寫入舊 Alyssa-shaped tables。
-          </p>
-        </section>
-
         {message ? (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
             {message}

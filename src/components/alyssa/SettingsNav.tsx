@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const settingsItems = [
-  { href: "/settings#brand-library", label: "品牌資料庫" },
+  { href: "/settings", label: "設定總覽" },
   { href: "/settings/brands", label: "品牌" },
   { href: "/settings/treatments", label: "療程" },
   { href: "/settings/packages", label: "Offers / Packages" },

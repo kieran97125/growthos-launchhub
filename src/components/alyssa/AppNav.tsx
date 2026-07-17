@@ -8,7 +8,6 @@ const navItems = [
   { href: "/forms", label: "Forms / 表格" },
   { href: "/leads", label: "Leads / 登記記錄" },
   { href: "/performance", label: "成效" },
-  { href: "/settings#brand-library", label: "品牌資料庫" },
   { href: "/settings", label: "設定" },
 ];
 
