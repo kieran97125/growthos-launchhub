@@ -7,6 +7,8 @@
     "utm_content",
     "utm_term",
     "fbclid",
+    "fbp",
+    "fbc",
     "gclid",
     "ttclid",
     "msclkid",
@@ -37,6 +39,13 @@
     lh_brand: "brand"
   };
   var ALL_ATTRIBUTION_KEYS = ATTRIBUTION_KEYS.concat(Object.keys(BACKUP_PARAM_MAP));
+  var INVALID_VALUES = { undefined: true, null: true, nan: true, none: true };
+
+  function cleanText(value) {
+    if (value === null || value === undefined) return "";
+    var cleaned = String(value).trim();
+    return cleaned && !INVALID_VALUES[cleaned.toLowerCase()] ? cleaned : "";
+  }
 
   function safeJsonParse(value) {
     try {
@@ -69,7 +78,16 @@
   }
 
   function normalizeAttributionFields(input) {
-    var output = Object.assign({}, input || {});
+    var output = {};
+    Object.keys(input || {}).forEach(function (key) {
+      var value = input[key];
+      if (typeof value === "string") {
+        var cleaned = cleanText(value);
+        if (cleaned) output[key] = cleaned;
+      } else if (typeof value === "number" || typeof value === "boolean") {
+        output[key] = value;
+      }
+    });
 
     Object.keys(BACKUP_PARAM_MAP).forEach(function (backupKey) {
       var canonicalKey = BACKUP_PARAM_MAP[backupKey];
@@ -91,17 +109,78 @@
     return output;
   }
 
+  function mergeTouch(base, incoming) {
+    return normalizeAttributionFields(
+      Object.assign({}, normalizeAttributionFields(base), normalizeAttributionFields(incoming))
+    );
+  }
+
+  function hasExplicitCtwa(touch) {
+    var medium = cleanText(touch && (touch.utm_medium || touch.lh_medium)).toLowerCase();
+    var referralType = cleanText(touch && touch.whatsapp_referral_source_type).toLowerCase();
+    return Boolean(
+      medium === "ctwa" ||
+      referralType === "ctwa" ||
+      cleanText(touch && touch.ctwa_id) ||
+      cleanText(touch && touch.ctwa_clid) ||
+      cleanText(touch && touch.whatsapp_referral_source_id)
+    );
+  }
+
+  function evidenceScore(value) {
+    var touch = normalizeAttributionFields(value);
+    if (hasExplicitCtwa(touch)) return 500;
+    var utmCount = ["utm_source", "utm_medium", "utm_campaign", "utm_id", "utm_content", "utm_term"]
+      .filter(function (key) { return cleanText(touch[key]); }).length;
+    if (utmCount >= 3) return 400 + utmCount;
+    if (utmCount > 0) return 300 + utmCount;
+    var clickCount = ["fbclid", "gclid", "ttclid", "msclkid", "wbraid", "gbraid"]
+      .filter(function (key) { return cleanText(touch[key]); }).length;
+    if (clickCount > 0) return 200 + clickCount;
+    var campaignCount = [
+      cleanText(touch.campaign_id || touch.meta_campaign_id),
+      cleanText(touch.adset_id || touch.meta_adset_id),
+      cleanText(touch.ad_id || touch.meta_ad_id),
+      cleanText(touch.placement)
+    ].filter(Boolean).length;
+    if (campaignCount > 0) return 150 + campaignCount;
+    var browserCount = ["fbp", "fbc"].filter(function (key) { return cleanText(touch[key]); }).length;
+    if (cleanText(touch.referrer) || cleanText(touch.parent_url)) return 50 + browserCount;
+    if (browserCount > 0) return 10 + browserCount;
+    return 0;
+  }
+
+  function strongestTouch(candidates) {
+    return candidates.reduce(function (best, candidate) {
+      var next = normalizeAttributionFields(candidate);
+      return evidenceScore(next) > evidenceScore(best) ? next : best;
+    }, {});
+  }
+
+  function normalizeEnvelope(value) {
+    var envelope = value && typeof value === "object" ? value : {};
+    return {
+      first_touch_json: normalizeAttributionFields(envelope.first_touch_json),
+      latest_touch_json: normalizeAttributionFields(envelope.latest_touch_json),
+      submitted_touch_json: normalizeAttributionFields(envelope.submitted_touch_json),
+      locked_touch_json: normalizeAttributionFields(envelope.locked_touch_json)
+    };
+  }
+
   function pickParams(searchParams) {
     var output = {};
     ALL_ATTRIBUTION_KEYS.forEach(function (key) {
-      var value = searchParams.get(key);
+      var value = cleanText(searchParams.get(key));
       if (value) output[key] = value;
     });
+    var cookieMap = { _fbp: "fbp", _fbc: "fbc" };
+    document.cookie.split(";").forEach(function (item) {
+      var pair = item.trim().split("=");
+      var key = cookieMap[decodeURIComponent(pair.shift() || "")];
+      var value = cleanText(decodeURIComponent(pair.join("=") || ""));
+      if (key && value) output[key] = value;
+    });
     return normalizeAttributionFields(output);
-  }
-
-  function hasKeys(value) {
-    return value && Object.keys(value).length > 0;
   }
 
   function getOrigin(value) {
@@ -162,16 +241,6 @@
     }
 
     return output;
-  }
-
-  function getPixelValue(value, fallback) {
-    var parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-  }
-
-  function getPixelCurrency(value) {
-    var cleaned = typeof value === "string" ? value.trim().toUpperCase() : "";
-    return cleaned || "HKD";
   }
 
   function isLazyLoadEnabled(value) {
@@ -290,31 +359,40 @@
     var embedOrigin = scriptOrigin;
     var parentPageUrl = getRealParentPageUrl();
     var parentOrigin = getOrigin(parentPageUrl) || window.location.origin;
-    var localKey = "launchhub_first_touch";
-    var sessionKey = "launchhub_latest_touch";
+    var wixParentOrigin = getOrigin(document.referrer);
+    var rawScope = script.getAttribute("data-attribution-scope") || formId || "unscoped";
+    var safeScope = rawScope.replace(/[^a-zA-Z0-9_-]+/g, "-");
+    var storageNamespace = "launchhub:attribution:v1:" + safeScope;
+    var localKey = storageNamespace + ":first";
+    var sessionKey = storageNamespace + ":latest";
+    var lockedKey = storageNamespace + ":locked";
+    var visitorKey = storageNamespace + ":visitor";
+    var sessionIdKey = storageNamespace + ":session";
     var searchParams = mergeSearchParams(parentPageUrl, window.location.search);
-    var visitorId =
-      readStorage("launchhub_visitor_id", window.localStorage) ||
-      readStorage("alyssa_visitor_id", window.localStorage) ||
-      createId("vis");
-    var sessionId =
-      readStorage("launchhub_session_id", window.sessionStorage) ||
-      readStorage("alyssa_session_id", window.sessionStorage) ||
-      createId("ses");
+    var visitorId = readStorage(visitorKey, window.localStorage) || createId("vis");
+    var sessionId = readStorage(sessionIdKey, window.sessionStorage) || createId("ses");
 
     var paramPayload = pickParams(searchParams);
-    var firstStored =
-      readStorage(localKey, window.localStorage) ||
-      readStorage("alyssa_first_touch", window.localStorage);
-    var latestStored =
-      readStorage(sessionKey, window.sessionStorage) ||
-      readStorage("alyssa_latest_touch", window.sessionStorage);
-    var hasCurrentParams = hasKeys(paramPayload);
+    var legacyFirst = readStorage("launchhub_first_touch", window.localStorage);
+    var legacyLatest = readStorage("launchhub_latest_touch", window.sessionStorage);
+    if (!legacyFirst || cleanText(legacyFirst.form_id) !== formId) legacyFirst = {};
+    if (!legacyLatest || cleanText(legacyLatest.form_id) !== formId) legacyLatest = {};
+    var firstStored = strongestTouch([
+      readStorage(lockedKey, window.localStorage),
+      readStorage(lockedKey, window.sessionStorage),
+      readStorage(localKey, window.localStorage),
+      legacyFirst
+    ]);
+    var latestStored = mergeTouch(
+      readStorage(sessionKey, window.sessionStorage),
+      legacyLatest
+    );
+    var hasCurrentParams = evidenceScore(paramPayload) >= 150;
     var captureMethod = hasCurrentParams
       ? "parent_embed_script"
-      : latestStored
+      : evidenceScore(latestStored) > 0
         ? "parent_embed_script_session_storage_recovered"
-        : firstStored
+        : evidenceScore(firstStored) > 0
           ? "parent_embed_script_local_storage_recovered"
           : "parent_embed_script_no_tracking_signal";
 
@@ -332,16 +410,14 @@
       page_title: document.title || "",
       captured_at: new Date().toISOString()
     };
-    var latestTouch = Object.assign({}, basePayload, latestStored || {}, paramPayload, {
-      source_capture_method: captureMethod
-    });
-    var firstTouch = firstStored || Object.assign({}, basePayload, paramPayload);
+    var currentTouch = mergeTouch(basePayload, paramPayload);
+    currentTouch.source_capture_method = captureMethod;
+    var latestTouch = mergeTouch(latestStored, currentTouch);
+    var firstTouch = strongestTouch([firstStored, currentTouch]);
     var localSaved = writeStorage(localKey, firstTouch, window.localStorage);
     var sessionSaved = writeStorage(sessionKey, latestTouch, window.sessionStorage);
-    writeStorage("launchhub_visitor_id", visitorId, window.localStorage);
-    writeStorage("launchhub_session_id", sessionId, window.sessionStorage);
-    writeStorage("alyssa_visitor_id", visitorId, window.localStorage);
-    writeStorage("alyssa_session_id", sessionId, window.sessionStorage);
+    writeStorage(visitorKey, visitorId, window.localStorage);
+    writeStorage(sessionIdKey, sessionId, window.sessionStorage);
 
     var debugClassification = classifyDebugPayload(latestTouch);
     var submittedTouch = Object.assign({}, latestTouch, {
@@ -350,6 +426,91 @@
       tracking_status: debugClassification.tracking_status,
       audit_reason: debugClassification.audit_reason
     });
+    var lockedTouch = strongestTouch([
+      readStorage(lockedKey, window.localStorage),
+      readStorage(lockedKey, window.sessionStorage),
+      firstTouch,
+      submittedTouch
+    ]);
+    writeStorage(lockedKey, lockedTouch, window.localStorage);
+    writeStorage(lockedKey, lockedTouch, window.sessionStorage);
+
+    function applyParentAttributionEnvelope(envelopeValue) {
+      var envelope = normalizeEnvelope(envelopeValue);
+      var incomingScore = Math.max(
+        evidenceScore(envelope.first_touch_json),
+        evidenceScore(envelope.latest_touch_json),
+        evidenceScore(envelope.submitted_touch_json)
+      );
+      if (incomingScore <= 0) return false;
+
+      firstTouch = strongestTouch([
+        lockedTouch,
+        firstTouch,
+        envelope.locked_touch_json,
+        envelope.first_touch_json,
+        envelope.latest_touch_json,
+        envelope.submitted_touch_json
+      ]);
+      latestTouch = mergeTouch(latestTouch, envelope.latest_touch_json);
+      submittedTouch = mergeTouch(
+        mergeTouch(submittedTouch, envelope.latest_touch_json),
+        envelope.submitted_touch_json
+      );
+      latestTouch.source_capture_method =
+        cleanText(envelope.latest_touch_json.source_capture_method) ||
+        "wix_page_code";
+      submittedTouch.source_capture_method =
+        cleanText(envelope.submitted_touch_json.source_capture_method) ||
+        latestTouch.source_capture_method;
+      parentPageUrl =
+        cleanText(submittedTouch.parent_url) ||
+        cleanText(submittedTouch.current_page_url) ||
+        parentPageUrl;
+      parentOrigin =
+        cleanText(submittedTouch.parent_origin) ||
+        getOrigin(parentPageUrl) ||
+        parentOrigin;
+      lockedTouch = strongestTouch([
+        lockedTouch,
+        firstTouch,
+        envelope.locked_touch_json,
+        envelope.first_touch_json,
+        envelope.latest_touch_json,
+        envelope.submitted_touch_json
+      ]);
+      writeStorage(localKey, firstTouch, window.localStorage);
+      writeStorage(sessionKey, latestTouch, window.sessionStorage);
+      writeStorage(lockedKey, lockedTouch, window.localStorage);
+      writeStorage(lockedKey, lockedTouch, window.sessionStorage);
+
+      debugClassification = classifyDebugPayload(submittedTouch);
+      submittedTouch.tracking_status = debugClassification.tracking_status;
+      submittedTouch.audit_reason = debugClassification.audit_reason;
+      if (typeof iframeUrl !== "undefined" && iframeUrl) {
+        Object.keys(submittedTouch).forEach(function (key) {
+          if (ATTRIBUTION_KEYS.indexOf(key) !== -1 && cleanText(submittedTouch[key])) {
+            iframeUrl.searchParams.set(key, submittedTouch[key]);
+          }
+        });
+        iframeUrl.searchParams.set("parent_url", parentPageUrl);
+        iframeUrl.searchParams.set("parent_origin", parentOrigin);
+      }
+      sendAttribution();
+      return true;
+    }
+
+    function requestWixParentAttribution() {
+      if (!window.parent || window.parent === window || !wixParentOrigin) return;
+      window.parent.postMessage(
+        {
+          type: "launchhub_wix_attribution_ready",
+          schema_version: 1,
+          form_token: formToken
+        },
+        wixParentOrigin
+      );
+    }
     var debugPayload = {
       submitted_touch_json: submittedTouch,
       tracking_status: debugClassification.tracking_status,
@@ -357,11 +518,9 @@
     };
 
     window.__LAUNCHHUB_LEAD_CAPTURE_DEBUG__ = debugPayload;
-    window.__ALYSSA_LEAD_CAPTURE_DEBUG__ = debugPayload;
 
     try {
       window.dispatchEvent(new CustomEvent("launchhub:attribution-captured", { detail: debugPayload }));
-      window.dispatchEvent(new CustomEvent("alyssa:attribution-captured", { detail: debugPayload }));
     } catch {
     }
 
@@ -429,50 +588,58 @@
       var payload = {
         first_touch_json: firstTouch,
         latest_touch_json: latestTouch,
-        submitted_touch_json: submittedTouch
+        submitted_touch_json: submittedTouch,
+        locked_touch_json: lockedTouch
       };
       iframe.contentWindow.postMessage(
-        { type: "launchhub_attribution_payload", payload: payload },
-        embedOrigin
-      );
-      iframe.contentWindow.postMessage(
-        { type: "alyssa_attribution_payload", payload: payload },
+        {
+          type: "launchhub_attribution_payload",
+          schema_version: 1,
+          payload: payload
+        },
         embedOrigin
       );
     }
 
     iframe.addEventListener("load", sendAttribution);
     window.addEventListener("message", function (event) {
-      if (event.origin !== embedOrigin) return;
+      var data = event.data || {};
+      var isWixAttributionMessage =
+        event.source === window.parent &&
+        data.type === "launchhub_attribution_payload";
+
+      if (isWixAttributionMessage) {
+        if (!wixParentOrigin || event.origin !== wixParentOrigin) return;
+        if (data.schema_version !== undefined && data.schema_version !== 1) return;
+        applyParentAttributionEnvelope(data.payload || {});
+        return;
+      }
+
+      if (event.origin !== embedOrigin || event.source !== iframe.contentWindow) return;
       if (
-        event.data &&
-        event.data.type === "launchhub:resize" &&
-        event.data.source === "launchhub-form" &&
-        (!event.data.formToken || event.data.formToken === formToken)
+        data.type === "launchhub:resize" &&
+        data.source === "launchhub-form" &&
+        (!data.formToken || data.formToken === formToken)
       ) {
-        var nextHeight = clampEmbedHeight(event.data.height);
+        var nextHeight = clampEmbedHeight(data.height);
         iframe.height = String(nextHeight);
         iframe.style.height = nextHeight + "px";
       }
-      if (
-        event.data &&
-        (event.data.type === "launchhub_iframe_ready" ||
-          event.data.type === "alyssa_iframe_ready")
-      ) {
+      if (data.type === "launchhub_iframe_ready") {
         sendAttribution();
       }
       if (
-        event.data &&
-        event.data.type === "launchhub:form-submitted" &&
-        event.data.event === "CompleteRegistration"
+        data.type === "launchhub:form-submitted" &&
+        data.event === "CompleteRegistration"
       ) {
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage(event.data, "*");
-        }
-        if (window.top && window.top !== window && window.top !== window.parent) {
-          window.top.postMessage(event.data, "*");
+          window.parent.postMessage(data, wixParentOrigin || window.location.origin);
         }
       }
+    });
+    requestWixParentAttribution();
+    [250, 1000, 2500].forEach(function (delay) {
+      window.setTimeout(requestWixParentAttribution, delay);
     });
 
     var target = targetId ? document.getElementById(targetId) : null;

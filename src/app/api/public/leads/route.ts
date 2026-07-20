@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   classifyAttribution,
@@ -5,6 +6,11 @@ import {
   normalizePhone,
 } from "@/lib/attribution/classify";
 import type { TouchPayload } from "@/lib/attribution/types";
+import { normalizeAttributionEnvelope } from "@/lib/attribution/core";
+import {
+  createAttributionTraceSummary,
+  createSanitizedAttributionPayload,
+} from "@/lib/attribution/telemetry";
 import { buildDerivedSuccessRedirectUrl } from "@/lib/data/derivedFormConfig";
 import { resolveGrowthOsPublicFormByToken } from "@/lib/data/growthosLaunchhubRepository";
 import {
@@ -53,11 +59,11 @@ function hasAcceptedLegalConsent(value: LeadSubmitPayload["legalConsentAccepted"
 }
 
 function getStorageRecoverySource(touch: TouchPayload) {
-  if (touch.source_capture_method === "parent_embed_script_local_storage_recovered") {
+  if (touch.source_capture_method?.includes("local_storage_recovered")) {
     return "local" as const;
   }
 
-  if (touch.source_capture_method === "parent_embed_script_session_storage_recovered") {
+  if (touch.source_capture_method?.includes("session_storage_recovered")) {
     return "session" as const;
   }
 
@@ -468,8 +474,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const submittedTouch = payload.submitted_touch_json ?? {};
+  const attributionEnvelope = normalizeAttributionEnvelope({
+    first_touch_json: payload.first_touch_json,
+    latest_touch_json: payload.latest_touch_json,
+    submitted_touch_json: payload.submitted_touch_json,
+  });
+  const submittedTouch = attributionEnvelope.submitted_touch_json ?? {};
   const classification = classifySubmittedTouch(submittedTouch);
+  const attributionTraceId = randomUUID();
+  const attributionTraceSummary = createAttributionTraceSummary({
+    traceId: attributionTraceId,
+    envelope: attributionEnvelope,
+    classification,
+  });
+  console.info("[LaunchHub] attribution_resolved", attributionTraceSummary);
   const eventValue =
     selectedPackage.promoPrice ?? selectedPackage.originalPrice ?? 0;
   const paymentStatus =
@@ -479,15 +497,10 @@ export async function POST(request: NextRequest) {
   const legalLinks = getLegalLinks(brand.slug);
   const acceptedAt = new Date().toISOString();
 
-  const rawTrackingData = {
-    first_touch_json: payload.first_touch_json ?? {},
-    latest_touch_json: payload.latest_touch_json ?? {},
-    submitted_touch_json: submittedTouch,
-    source_type: classification.sourceType,
-    attribution_quality: classification.attributionQuality,
-    current_page_url: cleanText(submittedTouch.current_page_url, 2000),
-    user_agent: shortUserAgent(request),
-  };
+  const rawTrackingData = createSanitizedAttributionPayload({
+    traceId: attributionTraceId,
+    envelope: attributionEnvelope,
+  });
 
   const snapshotPayload = {
     utm_source: cleanText(submittedTouch.utm_source, 300),
@@ -593,6 +606,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       lead_id: leadId,
       source_snapshot_id: sourceSnapshotId,
+      attribution_trace_id: attributionTraceId,
       source_type: classification.sourceType,
       tracking_status: classification.trackingStatus,
       audit_reason: classification.auditReason,

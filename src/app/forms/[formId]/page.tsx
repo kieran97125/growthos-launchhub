@@ -245,6 +245,12 @@ export default async function FormConfigPage({
               />
             ) : null}
 
+            <EmbedCodeCard
+              code={ops.wixAttributionBridgeCode}
+              title="Wix UTM Bridge"
+              description="將呢段加入承載 Form 嘅 Wix Page Code，確保網址 UTM、Campaign、Ad 同 Placement 可以穿過 HTML Component 傳入 LaunchHub。預設 HTML Component ID 係 #html1。"
+            />
+
             <section className="alyssa-premium-card p-5">
               <p className="alyssa-kicker">Meta URL Parameters</p>
               <h2 className="mt-2 text-xl font-bold text-slate-950">來源參數範本</h2>

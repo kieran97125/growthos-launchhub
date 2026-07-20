@@ -76,12 +76,12 @@ export default async function LandingPagesPage() {
             <p className="mt-2 text-sm font-semibold leading-6 text-[#6d4a5c]">
               {errorMessage}
             </p>
-            <a
+            <Link
               href="/landing-pages"
               className="mt-5 inline-flex rounded-full bg-[#5a2348] px-5 py-3 text-sm font-bold text-white"
             >
               重新載入
-            </a>
+            </Link>
           </section>
         ) : null}
 
