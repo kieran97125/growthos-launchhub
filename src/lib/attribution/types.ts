@@ -54,6 +54,9 @@ export type TrackingStatus = (typeof trackingStatuses)[number];
 export type LeadEventType = (typeof leadEventTypes)[number];
 
 export type TouchPayload = {
+  form_id?: string | null;
+  form_token?: string | null;
+  brand?: string | null;
   source_capture_method?: string | null;
   visitor_id?: string | null;
   session_id?: string | null;
@@ -64,6 +67,7 @@ export type TouchPayload = {
   page_path?: string | null;
   page_title?: string | null;
   referrer?: string | null;
+  parent_url?: string | null;
   utm_source?: string | null;
   utm_medium?: string | null;
   utm_campaign?: string | null;
@@ -71,11 +75,16 @@ export type TouchPayload = {
   utm_content?: string | null;
   utm_term?: string | null;
   fbclid?: string | null;
+  fbp?: string | null;
+  fbc?: string | null;
   gclid?: string | null;
   ttclid?: string | null;
   msclkid?: string | null;
   wbraid?: string | null;
   gbraid?: string | null;
+  campaign_id?: string | null;
+  adset_id?: string | null;
+  ad_id?: string | null;
   ctwa_id?: string | null;
   ctwa_clid?: string | null;
   whatsapp_message_id?: string | null;
@@ -85,11 +94,23 @@ export type TouchPayload = {
   meta_adset_id?: string | null;
   meta_campaign_id?: string | null;
   placement?: string | null;
+  lh_source?: string | null;
+  lh_medium?: string | null;
+  lh_campaign?: string | null;
+  lh_content?: string | null;
+  lh_term?: string | null;
+  lh_campaign_id?: string | null;
+  lh_adset_id?: string | null;
+  lh_ad_id?: string | null;
+  lh_placement?: string | null;
   meta_source_url?: string | null;
   whatsapp_referral_headline?: string | null;
   whatsapp_referral_body?: string | null;
   whatsapp_referral_source_type?: string | null;
   whatsapp_referral_source_id?: string | null;
+  captured_at?: string | null;
+  tracking_status?: string | null;
+  audit_reason?: string | null;
   raw_payload_json?: unknown;
 };
 

@@ -1,4 +1,9 @@
 import { AttributionClassification, TouchPayload } from "./types";
+import {
+  cleanAttributionText,
+  hasAttributionText,
+  hasExplicitCtwaEvidence,
+} from "./values";
 
 const utmKeys = [
   "utm_source",
@@ -18,8 +23,22 @@ const clickIdKeys = [
   "gbraid",
 ] as const;
 
-function hasValue(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0;
+function captureReason(
+  touch: TouchPayload,
+  direct: string,
+  parent: string,
+  storage: string
+) {
+  const method = cleanAttributionText(touch.source_capture_method, 120) || "";
+  if (method.includes("storage_recovered")) return storage;
+  if (
+    method.includes("parent") ||
+    method.includes("wix") ||
+    hasAttributionText(touch.parent_url)
+  ) {
+    return parent;
+  }
+  return direct;
 }
 
 export function classifyAttribution(
@@ -29,28 +48,23 @@ export function classifyAttribution(
     recoveredFromStorage?: "local" | "session" | null;
   }
 ): AttributionClassification {
-  if (options?.parentPayloadMissing) {
-    return {
-      sourceType: "organic_unknown",
-      attributionQuality: "missing",
-      trackingStatus: "missing",
-      auditReason: "iframe_missing_parent_payload",
-    };
-  }
-
-  const utmCount = utmKeys.filter((key) => hasValue(touch[key])).length;
-  const hasClickId = clickIdKeys.some((key) => hasValue(touch[key]));
-  const hasCtwa =
-    hasValue(touch.ctwa_id) ||
-    hasValue(touch.whatsapp_referral_source_id) ||
-    hasValue(touch.whatsapp_message_id) ||
-    hasValue(touch.meta_ad_id) ||
-    hasValue(touch.meta_adset_id) ||
-    hasValue(touch.meta_campaign_id);
+  const utmCount = utmKeys.filter((key) => hasAttributionText(touch[key])).length;
+  const hasClickId = clickIdKeys.some((key) => hasAttributionText(touch[key]));
+  const hasCampaignEvidence = [
+    touch.campaign_id,
+    touch.adset_id,
+    touch.ad_id,
+    touch.meta_campaign_id,
+    touch.meta_adset_id,
+    touch.meta_ad_id,
+    touch.placement,
+  ].some(hasAttributionText);
+  const hasCtwa = hasExplicitCtwaEvidence(touch);
   const hasReferrer =
-    hasValue(touch.referrer) ||
-    hasValue(touch.landing_page_url) ||
-    hasValue(touch.current_page_url);
+    hasAttributionText(touch.referrer) ||
+    hasAttributionText(touch.parent_url) ||
+    hasAttributionText(touch.landing_page_url) ||
+    hasAttributionText(touch.current_page_url);
 
   if (hasCtwa) {
     return {
@@ -66,19 +80,14 @@ export function classifyAttribution(
       sourceType: "reg_form_utm",
       attributionQuality: "complete_utm",
       trackingStatus: "complete_utm",
-      auditReason: "utm_found_on_parent_url",
-    };
-  }
-
-  if (options?.recoveredFromStorage && (utmCount > 0 || hasClickId)) {
-    return {
-      sourceType: "reg_form_utm",
-      attributionQuality: "storage_recovered",
-      trackingStatus: "storage_recovered",
-      auditReason:
-        options.recoveredFromStorage === "local"
-          ? "recovered_from_local_storage"
-          : "recovered_from_session_storage",
+      auditReason: captureReason(
+        touch,
+        "utm_captured_from_landing_page",
+        "utm_captured_from_parent_embed_page",
+        options?.recoveredFromStorage === "local"
+          ? "utm_recovered_from_local_storage"
+          : "utm_recovered_from_session_storage"
+      ),
     };
   }
 
@@ -87,7 +96,14 @@ export function classifyAttribution(
       sourceType: "reg_form_utm",
       attributionQuality: "partial_utm",
       trackingStatus: "partial_utm",
-      auditReason: "iframe_received_parent_payload",
+      auditReason: captureReason(
+        touch,
+        "partial_utm_captured_from_landing_page",
+        "partial_utm_captured_from_parent_embed_page",
+        options?.recoveredFromStorage === "local"
+          ? "partial_utm_recovered_from_local_storage"
+          : "partial_utm_recovered_from_session_storage"
+      ),
     };
   }
 
@@ -96,7 +112,39 @@ export function classifyAttribution(
       sourceType: "reg_form_utm",
       attributionQuality: "click_id_only",
       trackingStatus: "click_id_only",
-      auditReason: "fbclid_found_without_utm",
+      auditReason: captureReason(
+        touch,
+        "click_id_captured_from_landing_page",
+        "click_id_captured_from_parent_embed_page",
+        options?.recoveredFromStorage === "local"
+          ? "click_id_recovered_from_local_storage"
+          : "click_id_recovered_from_session_storage"
+      ),
+    };
+  }
+
+  if (hasCampaignEvidence) {
+    return {
+      sourceType: "reg_form_utm",
+      attributionQuality: "click_id_only",
+      trackingStatus: "click_id_only",
+      auditReason: captureReason(
+        touch,
+        "campaign_or_ad_id_captured_from_landing_page",
+        "campaign_or_ad_id_captured_from_parent_embed_page",
+        options?.recoveredFromStorage === "local"
+          ? "campaign_or_ad_id_recovered_from_local_storage"
+          : "campaign_or_ad_id_recovered_from_session_storage"
+      ),
+    };
+  }
+
+  if (options?.parentPayloadMissing && !hasReferrer) {
+    return {
+      sourceType: "organic_unknown",
+      attributionQuality: "missing",
+      trackingStatus: "missing",
+      auditReason: "iframe_missing_parent_payload",
     };
   }
 
@@ -105,7 +153,7 @@ export function classifyAttribution(
       sourceType: "organic_unknown",
       attributionQuality: "referrer_only",
       trackingStatus: "referrer_only",
-      auditReason: "organic_assigned_due_to_no_tracking_signal",
+      auditReason: "referrer_captured_without_utm_or_click_id",
     };
   }
 

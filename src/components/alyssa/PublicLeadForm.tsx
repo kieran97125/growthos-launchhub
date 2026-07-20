@@ -27,12 +27,8 @@ import {
   LEGAL_CONSENT_REQUIRED_MESSAGE,
   LEGAL_CONSENT_TEXT,
 } from "@/lib/legal/consent";
-
-type AttributionEnvelope = {
-  first_touch_json?: Record<string, unknown>;
-  latest_touch_json?: Record<string, unknown>;
-  submitted_touch_json?: Record<string, unknown>;
-};
+import type { AttributionEnvelope } from "@/lib/attribution/core";
+import { useAttributionBridge } from "@/lib/attribution/useAttributionBridge";
 
 type SubmitState = "idle" | "loading" | "success" | "error";
 
@@ -73,28 +69,6 @@ type PublicLeadFormProps = {
   className?: string;
 };
 
-const ATTRIBUTION_KEYS = [
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_id",
-  "utm_content",
-  "utm_term",
-  "fbclid",
-  "gclid",
-  "ttclid",
-  "msclkid",
-  "wbraid",
-  "gbraid",
-  "ctwa_id",
-  "ctwa_clid",
-  "meta_ad_id",
-  "meta_adset_id",
-  "meta_campaign_id",
-  "placement",
-  "whatsapp_referral_source_id",
-];
-
 function getString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -106,176 +80,6 @@ function getNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
-}
-
-function safeJsonParse(value: string | null) {
-  try {
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
-}
-
-function createId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random()
-    .toString(36)
-    .slice(2)}`;
-}
-
-function readStorage(key: string, storage: Storage) {
-  try {
-    return safeJsonParse(storage.getItem(key));
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: unknown, storage: Storage) {
-  try {
-    storage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function pickParams(searchParams: URLSearchParams) {
-  const output: Record<string, string> = {};
-  ATTRIBUTION_KEYS.forEach((key) => {
-    const value = searchParams.get(key);
-    if (value) output[key] = value;
-  });
-  return output;
-}
-
-function classifyTracking(payload: Record<string, unknown>) {
-  const utmCount = [
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_id",
-    "utm_content",
-    "utm_term",
-  ].filter((key) => payload[key]).length;
-  const hasClickId = Boolean(
-    payload.fbclid ||
-      payload.gclid ||
-      payload.ttclid ||
-      payload.msclkid ||
-      payload.wbraid ||
-      payload.gbraid
-  );
-
-  if (utmCount >= 3) {
-    return {
-      tracking_status: "complete_utm",
-      audit_reason: "utm_found_on_parent_url",
-    };
-  }
-
-  if (utmCount > 0) {
-    return {
-      tracking_status: "partial_utm",
-      audit_reason: "iframe_received_parent_payload",
-    };
-  }
-
-  if (hasClickId) {
-    return {
-      tracking_status: "click_id_only",
-      audit_reason: "fbclid_found_without_utm",
-    };
-  }
-
-  return {
-    tracking_status: "organic_unknown",
-    audit_reason: "no_url_params_no_storage",
-  };
-}
-
-function captureCurrentPageAttribution({
-  formToken,
-  formId,
-  brandSlug,
-}: {
-  formToken: string;
-  formId: string;
-  brandSlug: string;
-}): AttributionEnvelope {
-  const localKey = "launchhub_first_touch";
-  const sessionKey = "launchhub_latest_touch";
-  const searchParams = new URLSearchParams(window.location.search);
-  const visitorId =
-    readStorage("launchhub_visitor_id", window.localStorage) ||
-    readStorage("alyssa_visitor_id", window.localStorage) ||
-    createId("vis");
-  const sessionId =
-    readStorage("launchhub_session_id", window.sessionStorage) ||
-    readStorage("alyssa_session_id", window.sessionStorage) ||
-    createId("ses");
-  const paramPayload = pickParams(searchParams);
-  const firstStored =
-    readStorage(localKey, window.localStorage) ||
-    readStorage("alyssa_first_touch", window.localStorage);
-  const latestStored =
-    readStorage(sessionKey, window.sessionStorage) ||
-    readStorage("alyssa_latest_touch", window.sessionStorage);
-  const hasCurrentParams = Object.keys(paramPayload).length > 0;
-  const sourceCaptureMethod = hasCurrentParams
-    ? "public_landing_page"
-    : latestStored
-      ? "public_landing_page_session_storage_recovered"
-      : firstStored
-        ? "public_landing_page_local_storage_recovered"
-        : "public_landing_page_no_tracking_signal";
-  const basePayload = {
-    source_capture_method: sourceCaptureMethod,
-    visitor_id: visitorId,
-    session_id: sessionId,
-    brand: brandSlug,
-    form_id: formId,
-    form_token: formToken,
-    parent_origin: window.location.origin,
-    referrer: document.referrer || "",
-    landing_page_url:
-      firstStored && firstStored.landing_page_url
-        ? firstStored.landing_page_url
-        : window.location.href,
-    current_page_url: window.location.href,
-    page_path: window.location.pathname,
-    page_title: document.title || "",
-    captured_at: new Date().toISOString(),
-  };
-  const latestTouch = {
-    ...basePayload,
-    ...(latestStored || {}),
-    ...paramPayload,
-    source_capture_method: sourceCaptureMethod,
-  };
-  const firstTouch = firstStored || { ...basePayload, ...paramPayload };
-  const localSaved = writeStorage(localKey, firstTouch, window.localStorage);
-  const sessionSaved = writeStorage(sessionKey, latestTouch, window.sessionStorage);
-  writeStorage("launchhub_visitor_id", visitorId, window.localStorage);
-  writeStorage("launchhub_session_id", sessionId, window.sessionStorage);
-  const tracking = classifyTracking(latestTouch);
-  const submittedTouch = {
-    ...latestTouch,
-    storage_status:
-      localSaved && sessionSaved
-        ? "storage_available"
-        : localSaved
-          ? "session_storage_blocked"
-          : sessionSaved
-            ? "local_storage_blocked"
-            : "storage_blocked",
-    ...tracking,
-  };
-
-  return {
-    first_touch_json: firstTouch,
-    latest_touch_json: latestTouch,
-    submitted_touch_json: submittedTouch,
-  };
 }
 
 function normalizeForm(raw: Record<string, unknown>): PublicFormConfig {
@@ -392,7 +196,6 @@ export function PublicLeadForm({
   mode = "inline",
   className = "",
 }: PublicLeadFormProps) {
-  const [attribution, setAttribution] = useState<AttributionEnvelope>({});
   const [state, setState] = useState<SubmitState>("idle");
   const [message, setMessage] = useState("");
   const [configMessage, setConfigMessage] = useState("");
@@ -470,6 +273,24 @@ export function PublicLeadForm({
     [publicTheme]
   );
   const isEmbed = mode === "embed";
+  const { attribution, captureNow, attributionForSubmit } =
+    useAttributionBridge({
+      scopeKey: formId || publicForm.id,
+      formToken,
+      formId: formId || publicForm.id,
+      brandSlug: brand.slug || brandSlug || "brand",
+      expectedParentOrigin,
+      mode,
+      sourceCaptureMethod:
+        mode === "embed" ? "public_embed_form" : "public_landing_page",
+      onParentAttribution: (envelope) => {
+        void logPublicEvent(
+          "parent_attribution_captured",
+          { schema_version: 1, tracking_received: true },
+          envelope
+        );
+      },
+    });
 
   useEffect(() => {
     async function loadConfig() {
@@ -524,46 +345,13 @@ export function PublicLeadForm({
   }, [brandSlug, formToken]);
 
   useEffect(() => {
-    const initialAttribution = captureCurrentPageAttribution({
-      formToken,
-      formId: formId || publicForm.id,
-      brandSlug: brand.slug || brandSlug || "alyssa",
-    });
-    queueMicrotask(() => setAttribution(initialAttribution));
-    void logPublicEvent("form_view", { form_token: formToken }, initialAttribution);
-
-    function onMessage(event: MessageEvent) {
-      if (expectedParentOrigin && event.origin !== expectedParentOrigin) return;
-      if (
-        event.data?.type !== "launchhub_attribution_payload" &&
-        event.data?.type !== "alyssa_attribution_payload"
-      ) {
-        return;
-      }
-      const nextAttribution = event.data.payload || {};
-      setAttribution(nextAttribution);
-      void logPublicEvent(
-        "parent_attribution_captured",
-        nextAttribution,
-        nextAttribution
-      );
-    }
-
-    window.addEventListener("message", onMessage);
-
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage(
-        { type: "launchhub_iframe_ready" },
-        expectedParentOrigin || window.location.origin
-      );
-      window.parent.postMessage(
-        { type: "alyssa_iframe_ready" },
-        expectedParentOrigin || window.location.origin
-      );
-    }
-
-    return () => window.removeEventListener("message", onMessage);
-  }, [brand.slug, brandSlug, expectedParentOrigin, formId, formToken, publicForm.id]);
+    const initialAttribution = captureNow();
+    void logPublicEvent(
+      "form_view",
+      { form_token: formToken },
+      initialAttribution
+    );
+  }, [captureNow, formToken]);
 
   function updateField(key: keyof typeof formData, value: string) {
     setFormData((current) => {
@@ -605,7 +393,12 @@ export function PublicLeadForm({
 
     setState("loading");
     setMessage("正在提交預約資料...");
-    await logPublicEvent("form_submit_attempt", { form_token: formToken }, attribution);
+    const liveAttribution = await attributionForSubmit();
+    await logPublicEvent(
+      "form_submit_attempt",
+      { form_token: formToken },
+      liveAttribution
+    );
 
     try {
       const resolvedFormData = {
@@ -620,9 +413,9 @@ export function PublicLeadForm({
           ...resolvedFormData,
           form_token: formToken,
           form_id: formId || publicForm.id,
-          first_touch_json: attribution.first_touch_json || {},
-          latest_touch_json: attribution.latest_touch_json || {},
-          submitted_touch_json: attribution.submitted_touch_json || {},
+          first_touch_json: liveAttribution.first_touch_json || {},
+          latest_touch_json: liveAttribution.latest_touch_json || {},
+          submitted_touch_json: liveAttribution.submitted_touch_json || {},
         }),
       });
       const result = await response.json();
@@ -633,7 +426,7 @@ export function PublicLeadForm({
         await logPublicEvent(
           "form_submit_failed",
           { error: result.error || "submission_failed" },
-          attribution
+          liveAttribution
         );
         return;
       }
@@ -646,7 +439,7 @@ export function PublicLeadForm({
       await logPublicEvent(
         "form_submit_failed",
         { error: error instanceof Error ? error.message : "network_error" },
-        attribution
+        liveAttribution
       );
     }
   }

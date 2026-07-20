@@ -20,12 +20,7 @@ import {
   getLegalFooterText,
   getLegalLinks,
 } from "@/lib/legal/consent";
-
-type AttributionEnvelope = {
-  first_touch_json?: Record<string, unknown>;
-  latest_touch_json?: Record<string, unknown>;
-  submitted_touch_json?: Record<string, unknown>;
-};
+import { useAttributionBridge } from "@/lib/attribution/useAttributionBridge";
 
 type FormOption = { id: string; name: string };
 type ServiceOption = FormOption & { description: string };
@@ -54,28 +49,6 @@ type Props = {
   className?: string;
 };
 
-const TRACKING_KEYS = [
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_id",
-  "utm_content",
-  "utm_term",
-  "fbclid",
-  "gclid",
-  "ttclid",
-  "msclkid",
-  "wbraid",
-  "gbraid",
-  "ctwa_id",
-  "ctwa_clid",
-  "meta_ad_id",
-  "meta_adset_id",
-  "meta_campaign_id",
-  "placement",
-  "whatsapp_referral_source_id",
-];
-
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -83,136 +56,6 @@ function text(value: unknown) {
 function numberValue(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function safeJsonParse(value: string | null) {
-  try {
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
-}
-
-function readStorage(key: string, storage: Storage) {
-  try {
-    return safeJsonParse(storage.getItem(key));
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: unknown, storage: Storage) {
-  try {
-    storage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function createId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-}
-
-function trackingParams(searchParams: URLSearchParams) {
-  const result: Record<string, string> = {};
-  TRACKING_KEYS.forEach((key) => {
-    const value = searchParams.get(key);
-    if (value) result[key] = value;
-  });
-  return result;
-}
-
-function classifyTracking(payload: Record<string, unknown>) {
-  const utmCount = [
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_id",
-    "utm_content",
-    "utm_term",
-  ].filter((key) => payload[key]).length;
-  const hasClickId = Boolean(
-    payload.fbclid ||
-      payload.gclid ||
-      payload.ttclid ||
-      payload.msclkid ||
-      payload.wbraid ||
-      payload.gbraid
-  );
-
-  if (utmCount >= 3) {
-    return { tracking_status: "complete_utm", audit_reason: "utm_found_on_parent_url" };
-  }
-  if (utmCount > 0) {
-    return { tracking_status: "partial_utm", audit_reason: "iframe_received_parent_payload" };
-  }
-  if (hasClickId) {
-    return { tracking_status: "click_id_only", audit_reason: "click_id_found_without_utm" };
-  }
-  return { tracking_status: "organic_unknown", audit_reason: "no_url_params_no_storage" };
-}
-
-function captureAttribution(input: {
-  formToken: string;
-  formId: string;
-  brandSlug: string;
-}): AttributionEnvelope {
-  const firstKey = "launchhub_first_touch";
-  const latestKey = "launchhub_latest_touch";
-  const params = trackingParams(new URLSearchParams(window.location.search));
-  const visitorId =
-    readStorage("launchhub_visitor_id", window.localStorage) || createId("vis");
-  const sessionId =
-    readStorage("launchhub_session_id", window.sessionStorage) || createId("ses");
-  const storedFirst = readStorage(firstKey, window.localStorage);
-  const storedLatest = readStorage(latestKey, window.sessionStorage);
-  const method =
-    Object.keys(params).length > 0
-      ? "public_landing_page"
-      : storedLatest
-        ? "public_landing_page_session_storage_recovered"
-        : storedFirst
-          ? "public_landing_page_local_storage_recovered"
-          : "public_landing_page_no_tracking_signal";
-  const base = {
-    source_capture_method: method,
-    visitor_id: visitorId,
-    session_id: sessionId,
-    brand: input.brandSlug,
-    form_id: input.formId,
-    form_token: input.formToken,
-    parent_origin: window.location.origin,
-    referrer: document.referrer || "",
-    landing_page_url: storedFirst?.landing_page_url || window.location.href,
-    current_page_url: window.location.href,
-    page_path: window.location.pathname,
-    page_title: document.title || "",
-    captured_at: new Date().toISOString(),
-  };
-  const firstTouch = storedFirst || { ...base, ...params };
-  const latestTouch = { ...base, ...(storedLatest || {}), ...params, source_capture_method: method };
-  const localSaved = writeStorage(firstKey, firstTouch, window.localStorage);
-  const sessionSaved = writeStorage(latestKey, latestTouch, window.sessionStorage);
-  writeStorage("launchhub_visitor_id", visitorId, window.localStorage);
-  writeStorage("launchhub_session_id", sessionId, window.sessionStorage);
-
-  return {
-    first_touch_json: firstTouch,
-    latest_touch_json: latestTouch,
-    submitted_touch_json: {
-      ...latestTouch,
-      storage_status:
-        localSaved && sessionSaved
-          ? "storage_available"
-          : localSaved
-            ? "session_storage_blocked"
-            : sessionSaved
-              ? "local_storage_blocked"
-              : "storage_blocked",
-      ...classifyTracking(latestTouch),
-    },
-  };
 }
 
 function normalizeForm(raw: Record<string, unknown>): PublicFormConfig | null {
@@ -298,7 +141,6 @@ export function GrowthOsPublicLeadForm({
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [packages, setPackages] = useState<PackageOption[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [attribution, setAttribution] = useState<AttributionEnvelope>({});
   const [formData, setFormData] = useState({
     honeypot: "",
     customer_name: "",
@@ -341,6 +183,17 @@ export function GrowthOsPublicLeadForm({
       ) as CSSProperties,
     [brand?.name, brand?.slug]
   );
+  const { attributionForSubmit } = useAttributionBridge({
+    enabled: Boolean(publicForm && brand),
+    scopeKey: publicForm?.id || formId || "pending-form",
+    formToken,
+    formId: formId || publicForm?.id || "pending-form",
+    brandSlug: brand?.slug || "brand",
+    expectedParentOrigin,
+    mode,
+    sourceCaptureMethod:
+      mode === "embed" ? "public_embed_form" : "public_landing_page",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -392,30 +245,6 @@ export function GrowthOsPublicLeadForm({
     };
   }, [formToken]);
 
-  useEffect(() => {
-    if (!publicForm || !brand) return;
-    const initial = captureAttribution({
-      formToken,
-      formId: formId || publicForm.id,
-      brandSlug: brand.slug,
-    });
-    setAttribution(initial);
-
-    function onMessage(event: MessageEvent) {
-      if (expectedParentOrigin && event.origin !== expectedParentOrigin) return;
-      if (event.data?.type !== "launchhub_attribution_payload") return;
-      setAttribution(event.data.payload || {});
-    }
-    window.addEventListener("message", onMessage);
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage(
-        { type: "launchhub_iframe_ready" },
-        expectedParentOrigin || window.location.origin
-      );
-    }
-    return () => window.removeEventListener("message", onMessage);
-  }, [brand, expectedParentOrigin, formId, formToken, publicForm]);
-
   function updateField(key: keyof typeof formData, value: string | boolean) {
     setFormData((current) => {
       if (key === "treatment_id" && typeof value === "string") {
@@ -438,6 +267,7 @@ export function GrowthOsPublicLeadForm({
     setSubmitState("loading");
     setMessage("正在提交資料…");
     try {
+      const liveAttribution = await attributionForSubmit();
       const response = await fetch("/api/public/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -447,9 +277,9 @@ export function GrowthOsPublicLeadForm({
           form_id: formId || publicForm.id,
           treatment_id: selectedService.id,
           package_id: selectedPackage.id,
-          first_touch_json: attribution.first_touch_json || {},
-          latest_touch_json: attribution.latest_touch_json || {},
-          submitted_touch_json: attribution.submitted_touch_json || {},
+          first_touch_json: liveAttribution.first_touch_json || {},
+          latest_touch_json: liveAttribution.latest_touch_json || {},
+          submitted_touch_json: liveAttribution.submitted_touch_json || {},
         }),
       });
       const result = await response.json();
