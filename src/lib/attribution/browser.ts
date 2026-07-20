@@ -209,6 +209,12 @@ export function captureBrowserAttribution({
     currentTouch,
   ]);
   const latestTouch = mergeAttributionTouches(storedLatest, currentTouch);
+  // A clean iframe follow-up should refresh page/session metadata without
+  // rewriting the verified acquisition path supplied by the Wix parent.
+  latestTouch.source_capture_method = hasCurrentAcquisition
+    ? captureMethod
+    : cleanAttributionText(storedLatest.source_capture_method, 120) ||
+      captureMethod;
   const localSaved = writeStorage(window.localStorage, keys.first, firstTouch);
   const sessionSaved = writeStorage(
     window.sessionStorage,
