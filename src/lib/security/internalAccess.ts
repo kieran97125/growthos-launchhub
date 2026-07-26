@@ -76,31 +76,58 @@ function base64UrlEncode(value: string | ArrayBuffer) {
   bytes.forEach((byte) => {
     binary += String.fromCharCode(byte);
   });
-
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
-function base64UrlDecode(value: string) {
+function base64UrlDecodeBytes(value: string) {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
-async function signPayload(payloadValue: string, secret: string) {
-  const key = await crypto.subtle.importKey(
+function base64UrlDecodeText(value: string) {
+  return new TextDecoder().decode(base64UrlDecodeBytes(value));
+}
+
+async function importSigningKey(secret: string) {
+  return crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"]
+    ["sign", "verify"]
   );
+}
+
+async function signPayload(payloadValue: string, secret: string) {
+  const key = await importSigningKey(secret);
   const signature = await crypto.subtle.sign(
     "HMAC",
     key,
     new TextEncoder().encode(payloadValue)
   );
   return base64UrlEncode(signature);
+}
+
+async function verifyPayloadSignature(
+  payloadValue: string,
+  signatureValue: string,
+  secret: string
+) {
+  try {
+    const key = await importSigningKey(secret);
+    return crypto.subtle.verify(
+      "HMAC",
+      key,
+      base64UrlDecodeBytes(signatureValue),
+      new TextEncoder().encode(payloadValue)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function createSignedAdminSession() {
@@ -114,11 +141,12 @@ export async function createSignedAdminSession() {
   };
   const payloadValue = base64UrlEncode(JSON.stringify(payload));
   const signature = await signPayload(payloadValue, secret);
-
   return `${payloadValue}.${signature}`;
 }
 
-export async function verifySignedAdminSession(cookieValue: string | undefined | null) {
+export async function verifySignedAdminSession(
+  cookieValue: string | undefined | null
+) {
   if (!isAdminPasswordGateEnabled()) {
     return {
       ok: true,
@@ -141,15 +169,19 @@ export async function verifySignedAdminSession(cookieValue: string | undefined |
     return { ok: false, source: null, reason: "invalid_cookie" };
   }
 
-  const expectedSignature = await signPayload(payloadValue, secret);
-  if (signature !== expectedSignature) {
+  if (!(await verifyPayloadSignature(payloadValue, signature, secret))) {
     return { ok: false, source: null, reason: "invalid_signature" };
   }
 
   try {
-    const payload = JSON.parse(base64UrlDecode(payloadValue)) as AdminSessionPayload;
+    const payload = JSON.parse(
+      base64UrlDecodeText(payloadValue)
+    ) as AdminSessionPayload;
     if (!payload.expiresAt || payload.expiresAt < Date.now()) {
       return { ok: false, source: null, reason: "expired" };
+    }
+    if (!payload.issuedAt || payload.issuedAt > Date.now() + 60_000) {
+      return { ok: false, source: null, reason: "invalid_payload" };
     }
 
     return {
