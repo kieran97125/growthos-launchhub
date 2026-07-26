@@ -18,6 +18,19 @@ function privateRedirect(url: URL) {
   return response;
 }
 
+function unauthorizedApiResponse() {
+  return NextResponse.json(
+    { ok: false, error: "unauthorized" },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+        Vary: "Cookie",
+      },
+    }
+  );
+}
+
 function cleanBaseUrl(value: string | undefined) {
   const cleaned = value?.trim().replace(/\/+$/, "");
   return cleaned || null;
@@ -26,7 +39,6 @@ function cleanBaseUrl(value: string | undefined) {
 function originFromBaseUrl(value: string | undefined) {
   const configured = cleanBaseUrl(value);
   if (!configured) return null;
-
   try {
     return new URL(configured).origin;
   } catch {
@@ -96,20 +108,20 @@ function redirectToFallbackLogin(request: NextRequest) {
 }
 
 export async function proxy(request: NextRequest) {
-  if (isAdminBackendPath(request.nextUrl.pathname)) {
+  const pathname = request.nextUrl.pathname;
+
+  if (isAdminBackendPath(pathname)) {
     const adminOrigin = shouldUseAdminOrigin(request);
     if (adminOrigin) return redirectToAdminOrigin(request, adminOrigin);
   }
 
-  if (
-    isAdminPasswordGateEnabled() &&
-    isInternalRoute(request.nextUrl.pathname)
-  ) {
+  if (isAdminPasswordGateEnabled() && isInternalRoute(pathname)) {
     const session = await verifySignedAdminSession(
       request.cookies.get(adminSessionCookieName)?.value
     );
 
     if (!session.ok) {
+      if (pathname.startsWith("/api/")) return unauthorizedApiResponse();
       return request.nextUrl.searchParams.has(SSO_RECOVERY_MARKER)
         ? redirectToFallbackLogin(request)
         : redirectToGrowthOsSso(request);
