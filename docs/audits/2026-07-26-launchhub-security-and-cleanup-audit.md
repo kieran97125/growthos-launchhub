@@ -2,7 +2,7 @@
 
 - Date: 2026-07-26
 - Product: Kairvo LaunchHub
-- Status: hardening verified in Preview; production merge pending
+- Status: hardening verified and ready for production merge
 
 ## Confirmed healthy foundations
 
