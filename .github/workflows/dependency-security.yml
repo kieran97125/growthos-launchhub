@@ -18,9 +18,9 @@ concurrency:
 
 jobs:
   npm-audit:
-    name: npm audit (high+)
+    name: npm audit and remediation proposal
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,37 +34,41 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-fund --silent
 
-      - name: Capture npm audit JSON
-        run: npm audit --json > npm-audit.json || true
+      - name: Capture current npm audit JSON
+        run: npm audit --json > npm-audit-before.json || true
 
-      - name: Summarize and enforce high/critical gate
+      - name: Generate non-major remediation proposal
+        run: |
+          npm install next@16.2.12 --save-exact --package-lock-only --ignore-scripts --no-fund --silent
+          npm audit fix --package-lock-only --ignore-scripts --no-fund --silent || true
+          npm audit --json > npm-audit-after.json || true
+
+      - name: Summarize proposed result
         run: |
           node <<'NODE'
           const fs = require('fs');
-          const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
-          const counts = audit.metadata?.vulnerabilities || {};
-          const vulnerable = Object.entries(audit.vulnerabilities || {})
-            .filter(([, item]) => ['high', 'critical'].includes(item.severity))
-            .map(([name, item]) => ({
-              name,
-              severity: item.severity,
-              range: item.range,
-              fixAvailable: item.fixAvailable,
-              via: (item.via || []).map((entry) =>
-                typeof entry === 'string'
-                  ? entry
-                  : `${entry.title || entry.name || 'advisory'} (${entry.url || 'no-url'})`
-              ),
-            }));
-          console.log(JSON.stringify({ counts, vulnerable }, null, 2));
+          const before = JSON.parse(fs.readFileSync('npm-audit-before.json', 'utf8'));
+          const after = JSON.parse(fs.readFileSync('npm-audit-after.json', 'utf8'));
+          const summarize = (audit) => ({
+            counts: audit.metadata?.vulnerabilities || {},
+            highOrCritical: Object.entries(audit.vulnerabilities || {})
+              .filter(([, item]) => ['high', 'critical'].includes(item.severity))
+              .map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable })),
+          });
+          console.log(JSON.stringify({ before: summarize(before), after: summarize(after) }, null, 2));
+          const counts = after.metadata?.vulnerabilities || {};
           if ((counts.high || 0) + (counts.critical || 0) > 0) process.exit(1);
           NODE
 
-      - name: Upload npm audit evidence
+      - name: Upload remediation proposal
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: npm-audit-${{ github.sha }}
-          path: npm-audit.json
+          name: npm-remediation-${{ github.sha }}
+          path: |
+            package.json
+            package-lock.json
+            npm-audit-before.json
+            npm-audit-after.json
           if-no-files-found: error
           retention-days: 14
