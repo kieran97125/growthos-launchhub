@@ -32,7 +32,39 @@ jobs:
           cache: npm
 
       - name: Install locked dependencies
-        run: npm ci --ignore-scripts --no-fund
+        run: npm ci --ignore-scripts --no-fund --silent
 
-      - name: Check high and critical advisories
-        run: npm audit --audit-level=high
+      - name: Capture npm audit JSON
+        run: npm audit --json > npm-audit.json || true
+
+      - name: Summarize and enforce high/critical gate
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
+          const counts = audit.metadata?.vulnerabilities || {};
+          const vulnerable = Object.entries(audit.vulnerabilities || {})
+            .filter(([, item]) => ['high', 'critical'].includes(item.severity))
+            .map(([name, item]) => ({
+              name,
+              severity: item.severity,
+              range: item.range,
+              fixAvailable: item.fixAvailable,
+              via: (item.via || []).map((entry) =>
+                typeof entry === 'string'
+                  ? entry
+                  : `${entry.title || entry.name || 'advisory'} (${entry.url || 'no-url'})`
+              ),
+            }));
+          console.log(JSON.stringify({ counts, vulnerable }, null, 2));
+          if ((counts.high || 0) + (counts.critical || 0) > 0) process.exit(1);
+          NODE
+
+      - name: Upload npm audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ github.sha }}
+          path: npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
