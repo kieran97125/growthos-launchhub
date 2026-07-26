@@ -37,9 +37,9 @@ function isE2eFixtureRoute(pathname: string) {
 }
 
 export function isPublicRoute(pathname: string) {
-  if (isE2eFixtureRoute(pathname)) {
-    return process.env.LAUNCHHUB_E2E_FIXTURES === "1";
-  }
+  // The fixture page itself calls notFound() unless LAUNCHHUB_E2E_FIXTURES=1.
+  // Let it return a real 404 instead of leaking the internal SSO recovery flow.
+  if (isE2eFixtureRoute(pathname)) return true;
 
   return (
     publicExactRoutes.includes(pathname as (typeof publicExactRoutes)[number]) ||
