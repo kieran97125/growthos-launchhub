@@ -1,0 +1,74 @@
+name: Dependency Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "29 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-audit:
+    name: npm audit and remediation proposal
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-fund --silent
+
+      - name: Capture current npm audit JSON
+        run: npm audit --json > npm-audit-before.json || true
+
+      - name: Generate non-major remediation proposal
+        run: |
+          npm install next@16.2.12 --save-exact --package-lock-only --ignore-scripts --no-fund --silent
+          npm audit fix --package-lock-only --ignore-scripts --no-fund --silent || true
+          npm audit --json > npm-audit-after.json || true
+
+      - name: Summarize proposed result
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const before = JSON.parse(fs.readFileSync('npm-audit-before.json', 'utf8'));
+          const after = JSON.parse(fs.readFileSync('npm-audit-after.json', 'utf8'));
+          const summarize = (audit) => ({
+            counts: audit.metadata?.vulnerabilities || {},
+            highOrCritical: Object.entries(audit.vulnerabilities || {})
+              .filter(([, item]) => ['high', 'critical'].includes(item.severity))
+              .map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable })),
+          });
+          console.log(JSON.stringify({ before: summarize(before), after: summarize(after) }, null, 2));
+          const counts = after.metadata?.vulnerabilities || {};
+          if ((counts.high || 0) + (counts.critical || 0) > 0) process.exit(1);
+          NODE
+
+      - name: Upload remediation proposal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-remediation-${{ github.sha }}
+          path: |
+            package.json
+            package-lock.json
+            npm-audit-before.json
+            npm-audit-after.json
+          if-no-files-found: error
+          retention-days: 14
